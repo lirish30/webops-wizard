@@ -17,6 +17,11 @@ async function bootstrap() {
     new FastifyAdapter()
   );
 
+  app.enableCors({
+    origin: env.APP_URL,
+    credentials: true
+  });
+
   await app.listen({ host: env.API_HOST, port: env.API_PORT });
 }
 

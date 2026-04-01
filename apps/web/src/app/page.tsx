@@ -22,6 +22,12 @@ export default function HomePage() {
       </section>
 
       <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+        <Link href="/sign-in">
+          <Button>Sign in</Button>
+        </Link>
+        <Link href="/sign-up">
+          <Button>Create account</Button>
+        </Link>
         <Link href="/overview">
           <Button>Open MVP surfaces</Button>
         </Link>

@@ -5,21 +5,27 @@ import { usePathname } from "next/navigation";
 import { useEffect, useId, useState, type ReactNode } from "react";
 
 import { navigationItems } from "./app-shell-config";
+import type { AuthSession } from "../lib/auth-types";
+import { WorkspaceSwitcher } from "./workspace-switcher";
 
 type AppShellProps = {
   children: ReactNode;
+  session: AuthSession;
 };
 
 function isCurrentPath(currentPath: string, href: string) {
   return currentPath === href || currentPath.startsWith(`${href}/`);
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, session }: AppShellProps) {
   const pathname = usePathname();
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
-  const workspaceMenuId = useId();
   const propertyMenuId = useId();
   const userMenuId = useId();
+  const activeWorkspace =
+    session.memberships.find(
+      (membership) => membership.workspaceId === session.activeWorkspaceId
+    ) ?? session.memberships[0];
 
   useEffect(() => {
     setIsMobileNavOpen(false);
@@ -103,15 +109,10 @@ export function AppShell({ children }: AppShellProps) {
                 <span />
               </button>
 
-              <button
-                type="button"
-                className="switcher-button"
-                aria-haspopup="menu"
-                aria-controls={workspaceMenuId}
-              >
-                <span className="switcher-button__label">Workspace</span>
-                <strong>Growth Ops</strong>
-              </button>
+              <WorkspaceSwitcher
+                activeWorkspaceName={activeWorkspace?.workspaceName ?? "No workspace"}
+                activeWorkspaceRole={activeWorkspace?.role ?? "member"}
+              />
 
               <button
                 type="button"
@@ -144,11 +145,16 @@ export function AppShell({ children }: AppShellProps) {
                 aria-controls={userMenuId}
               >
                 <span className="user-button__avatar" aria-hidden="true">
-                  LI
+                  {session.user.fullName
+                    .split(" ")
+                    .map((part) => part[0] ?? "")
+                    .join("")
+                    .slice(0, 2)
+                    .toUpperCase()}
                 </span>
                 <span className="user-button__copy">
-                  <strong>Logan Irish</strong>
-                  <small>Admin</small>
+                  <strong>{session.user.fullName}</strong>
+                  <small>{activeWorkspace?.role ?? "member"}</small>
                 </span>
               </button>
             </div>
@@ -159,7 +165,6 @@ export function AppShell({ children }: AppShellProps) {
             <span className="status-pill">Last sync 4m ago</span>
             <span className="status-pill status-pill--accent">2 checks pending</span>
           </div>
-          <div id={workspaceMenuId} hidden />
           <div id={propertyMenuId} hidden />
           <div id={userMenuId} hidden />
         </header>
