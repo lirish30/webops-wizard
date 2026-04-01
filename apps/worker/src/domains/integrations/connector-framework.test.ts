@@ -666,7 +666,76 @@ describe("sync runner", () => {
     expect(latestRun?.healthMetadataJson.status).toBe("failed");
 
     expect(infoEntries.map((entry) => entry.event)).toEqual([
-      "connector_sync_started"
+      "connector_sync_started",
+      "connector_sync_completed"
+    ]);
+    expect(errorEntries).toEqual([]);
+    expect(entries.at(-1)).toMatchObject({
+      level: "info",
+      entry: {
+        event: "connector_sync_completed",
+        status: "failed"
+      }
+    });
+  });
+
+  it("persists failed run records for thrown execution failures", async () => {
+    const persistence = new InMemorySyncPersistence();
+    const store = new InMemoryCredentialStore();
+    const { entries, infoEntries, errorEntries, logger } = createCapturingLogger();
+    let attempt = 0;
+
+    await expect(
+      runConnectorSync({
+        connection: createTestConnection({ id: "ic_thrown_failure" }),
+        trigger: "retry",
+        now: new Date("2026-04-01T03:00:00.000Z"),
+        connector: createTestConnector(async () => {
+          attempt += 1;
+          throw new ConnectorExecutionError("upstream down", {
+            code: "UPSTREAM_UNAVAILABLE",
+            retryable: true
+          });
+        }),
+        credentialStore: store,
+        persistence,
+        logger,
+        retryPolicy: createRetryPolicy({ maxAttempts: 2, baseDelayMs: 1 })
+      })
+    ).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE"
+    });
+
+    expect(attempt).toBe(2);
+
+    const latestRun = persistence.getLatestRun("ic_thrown_failure");
+    expect(latestRun).toMatchObject({
+      status: "failed",
+      partialFailure: false,
+      partialFailureCount: 0,
+      stale: true
+    });
+    expect(latestRun?.durationMs).toBeGreaterThanOrEqual(0);
+    expect(latestRun?.health).toMatchObject({
+      status: "failed",
+      partialFailure: false,
+      partialFailureCount: 0,
+      attemptCount: 2,
+      retryCount: 1,
+      rateLimitCount: 0,
+      stale: true,
+      withinSla: false,
+      coverageRatio: 0,
+      expectedSegments: 0,
+      succeededSegments: 0,
+      missingSegments: []
+    });
+    expect(latestRun?.healthMetadataJson).toEqual(latestRun?.health);
+    expect(latestRun?.health.durationMs).toBe(latestRun?.durationMs);
+
+    expect(infoEntries.map((entry) => entry.event)).toEqual([
+      "connector_sync_started",
+      "connector_sync_retry_scheduled"
     ]);
     expect(errorEntries.map((entry) => entry.event)).toEqual([
       "connector_sync_failed"
@@ -675,7 +744,9 @@ describe("sync runner", () => {
       level: "error",
       entry: {
         event: "connector_sync_failed",
-        status: "failed"
+        status: "failed",
+        attemptCount: 2,
+        retryCount: 1
       }
     });
   });

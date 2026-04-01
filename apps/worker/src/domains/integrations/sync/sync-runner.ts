@@ -10,6 +10,7 @@ import type {
 import type { CredentialStore } from "../credentials/credential-store";
 
 import {
+  ConnectorExecutionError,
   createRetryPolicy,
   type RetryPolicy,
   type RetryObserver,
@@ -262,10 +263,8 @@ function logTerminalRunEvent(input: {
   durationMs: number;
   stale: boolean;
 }): void {
-  const entry = {
-    ...(input.status === "failed"
-      ? { event: "connector_sync_failed" }
-      : { event: "connector_sync_completed" }),
+  safeInfo(input.logger, {
+    event: "connector_sync_completed",
     ...input.logContext,
     status: input.status,
     partialFailure: input.partialFailure,
@@ -276,14 +275,7 @@ function logTerminalRunEvent(input: {
     rateLimitCount: input.rateLimitCount,
     durationMs: input.durationMs,
     stale: input.stale
-  };
-
-  if (input.status === "failed") {
-    safeError(input.logger, entry);
-    return;
-  }
-
-  safeInfo(input.logger, entry);
+  });
 }
 
 export async function runConnectorSync(
@@ -450,13 +442,80 @@ export async function runConnectorSync(
       issues
     };
   } catch (error) {
-    safeError(logger, {
-      event: "connector_sync_failed",
-      ...logContext,
+    const finishedAt = new Date();
+    const durationMs = computeDurationMs(
+      executionStartedAtMs,
+      finishedAt.getTime()
+    );
+    const freshness = computeFreshness({
+      latestDataAt: null,
+      now: input.now,
+      freshnessSlaMinutes: input.connection.freshnessSlaMinutes
+    });
+    const coverage: CoverageMetadata = {
+      expectedSegments: 0,
+      succeededSegments: 0,
+      ratio: 0,
+      missingSegments: []
+    };
+    const issue: ConnectorSyncRunIssueRecord = {
+      segment: "run",
+      code:
+        error instanceof ConnectorExecutionError ? error.code : "UNKNOWN",
+      message: error instanceof Error ? error.message : "Sync failed",
+      retryable:
+        error instanceof ConnectorExecutionError ? error.retryable : false
+    };
+    const issues = [issue];
+    const status: ConnectorSyncRunStatus = "failed";
+    const partialFailure = false;
+    const partialFailureCount = 0;
+    const stale = true;
+    const health = deriveHealthSummary({
+      status,
+      partialFailure,
+      partialFailureCount,
       attemptCount: retryTelemetry.attemptCount,
       retryCount: retryTelemetry.retryCount,
       rateLimitCount: retryTelemetry.rateLimitCount,
-      durationMs: computeDurationMs(executionStartedAtMs, Date.now()),
+      durationMs,
+      stale,
+      freshness,
+      coverage,
+      issues
+    });
+    const runRecord: ConnectorSyncRunRecord = {
+      id: runId,
+      integrationConnectionId: input.connection.id,
+      status,
+      partialFailure,
+      partialFailureCount,
+      trigger: input.trigger,
+      startedAt,
+      finishedAt,
+      durationMs,
+      stale,
+      freshnessMetadataJson: freshness,
+      coverageMetadataJson: coverage,
+      health,
+      healthMetadataJson: health,
+      issues
+    };
+
+    await input.persistence.writeRun(runRecord);
+
+    safeError(logger, {
+      event: "connector_sync_failed",
+      ...logContext,
+      status,
+      partialFailure,
+      partialFailureCount,
+      issueCount: issues.length,
+      attemptCount: retryTelemetry.attemptCount,
+      retryCount: retryTelemetry.retryCount,
+      rateLimitCount: retryTelemetry.rateLimitCount,
+      durationMs,
+      stale,
       errorName: error instanceof Error ? error.name : "UnknownError",
       errorMessage: error instanceof Error ? error.message : "Unknown error",
       ...(typeof error === "object" &&
