@@ -61,7 +61,7 @@ function emitObserverEvent(
   event: RetryObserverEvent
 ): void {
   try {
-    observer?.onEvent(event);
+    void Promise.resolve(observer?.onEvent(event)).catch(() => {});
   } catch {
     // Observability must not alter retry behavior.
   }

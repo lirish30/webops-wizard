@@ -143,6 +143,48 @@ describe("retry runner", () => {
     ]);
   });
 
+  it("ignores async observer rejections and keeps retry behavior intact", async () => {
+    let attempt = 0;
+    const observerCalls: Array<string> = [];
+
+    const result = await runWithRetry(
+      async () => {
+        attempt += 1;
+
+        if (attempt < 3) {
+          throw new ConnectorExecutionError("transient", {
+            code: "UPSTREAM_UNAVAILABLE",
+            retryable: true
+          });
+        }
+
+        return "ok";
+      },
+      createRetryPolicy({ maxAttempts: 3, baseDelayMs: 1 }),
+      {
+        async onEvent(event) {
+          observerCalls.push(event.type);
+
+          if (event.type === "attempt_failed") {
+            await Promise.reject(new Error("observer rejected"));
+          }
+        }
+      }
+    );
+
+    expect(result).toBe("ok");
+    expect(attempt).toBe(3);
+    expect(observerCalls).toEqual([
+      "attempt_started",
+      "attempt_failed",
+      "retry_scheduled",
+      "attempt_started",
+      "attempt_failed",
+      "retry_scheduled",
+      "attempt_started"
+    ]);
+  });
+
   it("emits a rate_limited event in a real retry path", async () => {
     const events: Array<Record<string, unknown>> = [];
     let attempt = 0;
