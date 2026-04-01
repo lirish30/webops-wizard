@@ -8,222 +8,721 @@ datasource db {
 }
 
 model User {
-  id                    String                 @id @default(uuid())
-  email                 String                 @unique
-  passwordHash          String?
-  fullName              String
-  authProvider          AuthProvider           @default(local)
-  status                UserStatus             @default(active)
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
-  memberships           WorkspaceMembership[]
-  ownedWorkspaces       Workspace[]            @relation("WorkspaceOwner")
-  authSessions          AuthSession[]
-  passwordResetTokens   PasswordResetToken[]
-  sentWorkspaceInvites  WorkspaceInvite[]      @relation("WorkspaceInviteInviter")
-  acceptedWorkspaceInvites WorkspaceInvite[]   @relation("WorkspaceInviteAcceptedUser")
-  externalIdentityLinks ExternalIdentityLink[]
-  authoredAuditEvents   AuditLogEvent[]        @relation("AuditActorUser")
+  id                         String                        @id @default(uuid())
+  email                      String                        @unique @db.Citext
+  passwordHash               String?                       @map("password_hash")
+  fullName                   String                        @map("full_name")
+  authProvider               AuthProvider                  @default(local) @map("auth_provider")
+  status                     UserStatus                    @default(active)
+  lastLoginAt                DateTime?                     @map("last_login_at") @db.Timestamptz(6)
+  createdAt                  DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime                      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  memberships                WorkspaceMembership[]
+  ownedWorkspaces            Workspace[]                   @relation("WorkspaceOwner")
+  authSessions               AuthSession[]
+  passwordResetTokens        PasswordResetToken[]
+  sentWorkspaceInvites       WorkspaceInvite[]             @relation("WorkspaceInviteInviter")
+  acceptedWorkspaceInvites   WorkspaceInvite[]             @relation("WorkspaceInviteAcceptedUser")
+  externalIdentityLinks      ExternalIdentityLink[]
+  createdIntegrationLinks    IntegrationConnection[]       @relation("IntegrationCreatedBy")
+  createdComparabilityWindow ComparabilityWindow[]
+  createdAnnotations         MeasurementAnnotation[]
+  pageOwnership              CanonicalPage[]               @relation("CanonicalPageOwner")
+  conversionVersionAuthors   ConversionDefinitionVersion[]
+  createdReleaseEvents       ReleaseAnnotation[]           @relation("ReleaseCreatedBy")
+  experimentOwnership        Experiment[]                  @relation("ExperimentOwner")
+  recommendationOwnership    Recommendation[]              @relation("RecommendationOwner")
+  generatedReports           Report[]                      @relation("ReportGeneratedBy")
+  approvedReports            Report[]                      @relation("ReportApprovedBy")
+  authoredAuditEvents        AuditLogEvent[]               @relation("AuditActorUser")
+
+  @@map("users")
 }
 
 model Workspace {
-  id          String                @id @default(uuid())
-  name        String
-  slug        String                @unique
-  ownerUserId String
-  planTier    String                @default("starter")
-  region      String                @default("us")
-  status      WorkspaceStatus       @default(active)
-  createdAt   DateTime              @default(now())
-  updatedAt   DateTime              @updatedAt
-  owner       User                  @relation("WorkspaceOwner", fields: [ownerUserId], references: [id])
-  memberships WorkspaceMembership[]
-  invites     WorkspaceInvite[]
-  properties  Property[]
-  auditEvents AuditLogEvent[]
+  id           String                  @id @default(uuid())
+  name         String
+  slug         String                  @unique
+  ownerUserId  String                  @map("owner_user_id")
+  planTier     WorkspacePlanTier       @default(starter) @map("plan_tier")
+  region       String                  @default("us")
+  status       WorkspaceStatus         @default(active)
+  createdAt    DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  owner        User                    @relation("WorkspaceOwner", fields: [ownerUserId], references: [id])
+  memberships  WorkspaceMembership[]
+  invites      WorkspaceInvite[]
+  properties   Property[]
+  integrations IntegrationConnection[]
+  auditEvents  AuditLogEvent[]
+
+  @@index([ownerUserId])
+  @@map("workspaces")
 }
 
 model WorkspaceMembership {
   id           String         @id @default(uuid())
-  workspaceId  String
-  userId       String
+  workspaceId  String         @map("workspace_id")
+  userId       String         @map("user_id")
   role         MembershipRole
-  lastActiveAt DateTime?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  workspace    Workspace      @relation(fields: [workspaceId], references: [id])
-  user         User           @relation(fields: [userId], references: [id])
+  scopeJson    Json?          @map("scope_json")
+  lastActiveAt DateTime?      @map("last_active_at") @db.Timestamptz(6)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId, role])
+  @@map("workspace_memberships")
 }
 
 model AuthSession {
-  id                 String    @id @default(uuid())
-  userId             String
-  refreshTokenHash   String
-  activeWorkspaceId  String?
-  userAgent          String?
-  ipAddress          String?
-  expiresAt          DateTime
-  revokedAt          DateTime?
-  lastUsedAt         DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-  user               User      @relation(fields: [userId], references: [id])
+  id                String    @id @default(uuid())
+  userId            String    @map("user_id")
+  refreshTokenHash  String    @map("refresh_token_hash")
+  activeWorkspaceId String?   @map("active_workspace_id")
+  userAgent         String?   @map("user_agent")
+  ipAddress         String?   @map("ip_address")
+  expiresAt         DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz(6)
+  lastUsedAt        DateTime? @map("last_used_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([refreshTokenHash])
   @@index([userId])
   @@index([expiresAt])
+  @@index([userId, revokedAt, expiresAt])
+  @@map("auth_sessions")
 }
 
 model PasswordResetToken {
   id         String    @id @default(uuid())
-  userId     String
-  tokenHash  String
-  expiresAt  DateTime
-  consumedAt DateTime?
-  createdAt  DateTime  @default(now())
-  user       User      @relation(fields: [userId], references: [id])
+  userId     String    @map("user_id")
+  tokenHash  String    @map("token_hash")
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([tokenHash])
   @@index([userId])
   @@index([expiresAt])
+  @@index([userId, consumedAt, expiresAt])
+  @@map("password_reset_tokens")
 }
 
 model WorkspaceInvite {
   id             String         @id @default(uuid())
-  workspaceId    String
-  email          String
+  workspaceId    String         @map("workspace_id")
+  email          String         @db.Citext
   role           MembershipRole
-  inviterUserId  String
-  tokenHash      String
-  expiresAt      DateTime
-  acceptedAt     DateTime?
-  acceptedUserId String?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  workspace      Workspace      @relation(fields: [workspaceId], references: [id])
+  inviterUserId  String         @map("inviter_user_id")
+  tokenHash      String         @map("token_hash")
+  expiresAt      DateTime       @map("expires_at") @db.Timestamptz(6)
+  acceptedAt     DateTime?      @map("accepted_at") @db.Timestamptz(6)
+  acceptedUserId String?        @map("accepted_user_id")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   inviter        User           @relation("WorkspaceInviteInviter", fields: [inviterUserId], references: [id])
   acceptedUser   User?          @relation("WorkspaceInviteAcceptedUser", fields: [acceptedUserId], references: [id])
 
+  @@unique([tokenHash])
   @@index([workspaceId, email])
   @@index([expiresAt])
+  @@index([workspaceId, acceptedAt, expiresAt])
+  @@map("workspace_invites")
 }
 
 model IdentityProvider {
-  id          String               @id @default(uuid())
-  type        IdentityProviderType @unique
-  displayName String
+  id          String                 @id @default(uuid())
+  type        IdentityProviderType   @unique
+  displayName String                 @map("display_name")
   status      IdentityProviderStatus @default(coming_soon)
-  configJson  Json?
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
+  configJson  Json?                  @map("config_json")
+  createdAt   DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
   links       ExternalIdentityLink[]
+
+  @@map("identity_providers")
 }
 
 model ExternalIdentityLink {
-  id              String            @id @default(uuid())
-  userId          String
-  providerId      String
-  providerSubject String
-  emailSnapshot   String
-  lastLoginAt     DateTime?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  user            User              @relation(fields: [userId], references: [id])
-  provider        IdentityProvider  @relation(fields: [providerId], references: [id])
+  id              String           @id @default(uuid())
+  userId          String           @map("user_id")
+  providerId      String           @map("provider_id")
+  providerSubject String           @map("provider_subject")
+  emailSnapshot   String           @map("email_snapshot") @db.Citext
+  lastLoginAt     DateTime?        @map("last_login_at") @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        IdentityProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
 
   @@unique([providerId, providerSubject])
   @@index([userId])
+  @@map("external_identity_links")
 }
 
 model Property {
-  id              String                  @id @default(uuid())
-  workspaceId     String
-  name            String
-  primaryDomain   String
-  environment     PropertyEnvironment     @default(production)
-  createdAt       DateTime                @default(now())
-  updatedAt       DateTime                @updatedAt
-  workspace       Workspace               @relation(fields: [workspaceId], references: [id])
-  integrations    IntegrationConnection[]
-  recommendations Recommendation[]
-  alerts          Alert[]
-  releases        ReleaseAnnotation[]
+  id                      String                  @id @default(uuid())
+  workspaceId             String                  @map("workspace_id")
+  name                    String
+  primaryDomain           String                  @map("primary_domain")
+  environment             PropertyEnvironment     @default(prod)
+  businessModel           PropertyBusinessModel   @default(other) @map("business_model")
+  analyticsSourceOfTruth  String?                 @map("analytics_source_of_truth")
+  conversionSourceOfTruth String?                 @map("conversion_source_of_truth")
+  crmSourceOfTruth        String?                 @map("crm_source_of_truth")
+  status                  PropertyStatus          @default(draft)
+  archivedAt              DateTime?               @map("archived_at") @db.Timestamptz(6)
+  setupVersion            Int                     @default(1) @map("setup_version")
+  createdAt               DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace               Workspace               @relation(fields: [workspaceId], references: [id])
+  settings                PropertySetting[]
+  integrations            IntegrationConnection[]
+  dataSourceHealthRows    DataSourceHealth[]
+  comparabilityWindows    ComparabilityWindow[]
+  measurementAnnotations  MeasurementAnnotation[]
+  pageGroups              PageGroup[]
+  templates               Template[]
+  canonicalPages          CanonicalPage[]
+  urlRecords              UrlRecord[]
+  pageMetricDailyRows     PageMetricDaily[]
+  queryMetricDailyRows    QueryMetricDaily[]
+  conversionDefinitions   ConversionDefinition[]
+  releases                ReleaseAnnotation[]
+  experiments             Experiment[]
+  recommendations         Recommendation[]
+  reports                 Report[]
+  alerts                  Alert[]
+  auditLogs               AuditLogEvent[]
+
+  @@unique([workspaceId, primaryDomain])
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@map("properties")
+}
+
+model PropertySetting {
+  id                    String   @id @default(uuid())
+  propertyId            String   @map("property_id")
+  includeRulesJson      Json?    @map("include_rules_json")
+  excludeRulesJson      Json?    @map("exclude_rules_json")
+  taxonomySettingsJson  Json?    @map("taxonomy_settings_json")
+  benchmarkSettingsJson Json?    @map("benchmark_settings_json")
+  alertSettingsJson     Json?    @map("alert_settings_json")
+  reportSettingsJson    Json?    @map("report_settings_json")
+  trustPolicyJson       Json?    @map("trust_policy_json")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  property              Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId])
+  @@map("property_settings")
 }
 
 model IntegrationConnection {
-  id            String              @id @default(uuid())
-  workspaceId   String
-  propertyId    String?
-  provider      IntegrationProvider
-  status        IntegrationStatus   @default(syncing)
-  lastSuccessAt DateTime?
-  configJson    Json?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  property      Property?           @relation(fields: [propertyId], references: [id])
+  id                 String              @id @default(uuid())
+  workspaceId        String              @map("workspace_id")
+  propertyId         String?             @map("property_id")
+  provider           IntegrationProvider
+  authType           IntegrationAuthType @default(oauth) @map("auth_type")
+  status             IntegrationStatus   @default(syncing)
+  credentialRef      String?             @map("credential_ref")
+  configJson         Json?               @map("config_json")
+  lastSyncedAt       DateTime?           @map("last_synced_at") @db.Timestamptz(6)
+  lastSuccessAt      DateTime?           @map("last_success_at") @db.Timestamptz(6)
+  lastErrorAt        DateTime?           @map("last_error_at") @db.Timestamptz(6)
+  lastErrorMessage   String?             @map("last_error_message")
+  freshnessSlaMinute Int?                @map("freshness_sla_minutes")
+  createdByUserId    String?             @map("created_by_user_id")
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  property           Property?           @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  createdByUser      User?               @relation("IntegrationCreatedBy", fields: [createdByUserId], references: [id])
+  healthChecks       DataSourceHealth[]
+
+  @@unique([workspaceId, propertyId, provider])
+  @@index([workspaceId])
+  @@index([propertyId])
+  @@index([status])
+  @@index([propertyId, provider])
+  @@map("integration_connections")
 }
 
-model Recommendation {
-  id                 String   @id @default(uuid())
-  propertyId         String
-  title              String
-  category           String
-  status             String   @default("new")
-  impactScore        Decimal  @default(0)
-  confidenceScore    Decimal  @default(0)
-  sourceEvidenceJson Json?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  property           Property @relation(fields: [propertyId], references: [id])
+model DataSourceHealth {
+  id                      String                 @id @default(uuid())
+  propertyId              String                 @map("property_id")
+  integrationConnectionId String                 @map("integration_connection_id")
+  sourceName              String                 @map("source_name")
+  healthStatus            DataSourceHealthStatus @default(healthy) @map("health_status")
+  freshnessScore          Decimal?               @map("freshness_score") @db.Decimal(6, 3)
+  coverageScore           Decimal?               @map("coverage_score") @db.Decimal(6, 3)
+  reliabilityScore        Decimal?               @map("reliability_score") @db.Decimal(6, 3)
+  issueCount              Int                    @default(0) @map("issue_count")
+  measuredAt              DateTime               @map("measured_at") @db.Timestamptz(6)
+  property                Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  integrationConnection   IntegrationConnection  @relation(fields: [integrationConnectionId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, measuredAt])
+  @@index([integrationConnectionId, measuredAt])
+  @@map("data_source_health")
 }
 
-model Alert {
-  id           String   @id @default(uuid())
-  propertyId   String
-  type         String
-  severity     String
-  status       String   @default("open")
-  title        String
-  body         String
-  evidenceJson Json?
-  triggeredAt  DateTime @default(now())
-  property     Property @relation(fields: [propertyId], references: [id])
+model ComparabilityWindow {
+  id              String        @id @default(uuid())
+  propertyId      String        @map("property_id")
+  startDate       DateTime      @map("start_date") @db.Date
+  endDate         DateTime      @map("end_date") @db.Date
+  scopeType       DataScopeType @map("scope_type")
+  scopeId         String?       @map("scope_id")
+  reasonCode      String        @map("reason_code")
+  notes           String?
+  createdByUserId String?       @map("created_by_user_id")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  property        Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  createdByUser   User?         @relation(fields: [createdByUserId], references: [id])
+
+  @@index([propertyId, startDate, endDate])
+  @@index([propertyId, scopeType, scopeId])
+  @@map("comparability_windows")
+}
+
+model MeasurementAnnotation {
+  id              String              @id @default(uuid())
+  propertyId      String              @map("property_id")
+  scopeType       AnnotationScopeType @map("scope_type")
+  scopeId         String?             @map("scope_id")
+  annotationType  AnnotationType      @map("annotation_type")
+  title           String
+  description     String
+  severity        AnnotationSeverity
+  activeFrom      DateTime            @map("active_from") @db.Timestamptz(6)
+  activeTo        DateTime?           @map("active_to") @db.Timestamptz(6)
+  createdByUserId String?             @map("created_by_user_id")
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  property        Property            @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  createdByUser   User?               @relation(fields: [createdByUserId], references: [id])
+
+  @@index([propertyId, activeFrom, activeTo])
+  @@index([propertyId, scopeType, scopeId])
+  @@map("measurement_annotations")
+}
+
+model PageGroup {
+  id          String          @id @default(uuid())
+  propertyId  String          @map("property_id")
+  name        String
+  groupType   PageGroupType   @map("group_type")
+  description String?
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  property    Property        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  pages       CanonicalPage[]
+
+  @@unique([propertyId, name])
+  @@index([propertyId, groupType])
+  @@map("page_groups")
+}
+
+model Template {
+  id             String              @id @default(uuid())
+  propertyId     String              @map("property_id")
+  name           String
+  templateFamily String?             @map("template_family")
+  description    String?
+  active         Boolean             @default(true)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  property       Property            @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  pages          CanonicalPage[]
+  pageSnapshots  PageStateSnapshot[]
+
+  @@unique([propertyId, name])
+  @@index([propertyId, active])
+  @@map("templates")
+}
+
+model CanonicalPage {
+  id                 String                @id @default(uuid())
+  propertyId         String                @map("property_id")
+  canonicalUrl       String                @map("canonical_url")
+  normalizedUrlKey   String                @map("normalized_url_key")
+  title              String?
+  metaTitle          String?               @map("meta_title")
+  metaDescription    String?               @map("meta_description")
+  h1                 String?
+  templateId         String?               @map("template_id")
+  pageGroupId        String?               @map("page_group_id")
+  pageArchetype      String?               @map("page_archetype")
+  contentType        String?               @map("content_type")
+  funnelStage        String?               @map("funnel_stage")
+  ownerTeam          String?               @map("owner_team")
+  ownerUserId        String?               @map("owner_user_id")
+  languageCode       String?               @map("language_code")
+  regionCode         String?               @map("region_code")
+  indexabilityStatus IndexabilityStatus    @default(indexable) @map("indexability_status")
+  canonicalTargetUrl String?               @map("canonical_target_url")
+  redirectTargetUrl  String?               @map("redirect_target_url")
+  priorityTier       PriorityTier          @default(p2) @map("priority_tier")
+  status             CanonicalPageStatus   @default(active)
+  firstSeenAt        DateTime?             @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt         DateTime?             @map("last_seen_at") @db.Timestamptz(6)
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  property           Property              @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  template           Template?             @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  pageGroup          PageGroup?            @relation(fields: [pageGroupId], references: [id], onDelete: SetNull)
+  ownerUser          User?                 @relation("CanonicalPageOwner", fields: [ownerUserId], references: [id])
+  urlRecords         UrlRecord[]
+  localizationRows   LocalizationVariant[]
+  snapshots          PageStateSnapshot[]
+  pageMetricDaily    PageMetricDaily[]
+  queryMetricDaily   QueryMetricDaily[]
+
+  @@unique([propertyId, normalizedUrlKey])
+  @@index([propertyId, templateId])
+  @@index([propertyId, pageGroupId])
+  @@index([propertyId, status])
+  @@map("canonical_pages")
+}
+
+model UrlRecord {
+  id               String                @id @default(uuid())
+  propertyId       String                @map("property_id")
+  canonicalPageId  String                @map("canonical_page_id")
+  rawUrl           String                @map("raw_url")
+  normalizedUrlKey String                @map("normalized_url_key")
+  isCurrentAlias   Boolean               @default(true) @map("is_current_alias")
+  firstSeenAt      DateTime?             @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt       DateTime?             @map("last_seen_at") @db.Timestamptz(6)
+  source           String?
+  property         Property              @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  canonicalPage    CanonicalPage         @relation(fields: [canonicalPageId], references: [id], onDelete: Cascade)
+  localizationRows LocalizationVariant[]
+
+  @@unique([propertyId, normalizedUrlKey])
+  @@index([canonicalPageId])
+  @@index([propertyId, isCurrentAlias])
+  @@index([propertyId, canonicalPageId])
+  @@map("url_records")
+}
+
+model LocalizationVariant {
+  id              String        @id @default(uuid())
+  canonicalPageId String        @map("canonical_page_id")
+  localeCode      String        @map("locale_code")
+  regionCode      String?       @map("region_code")
+  urlRecordId     String        @map("url_record_id")
+  isPrimary       Boolean       @default(false) @map("is_primary")
+  canonicalPage   CanonicalPage @relation(fields: [canonicalPageId], references: [id], onDelete: Cascade)
+  urlRecord       UrlRecord     @relation(fields: [urlRecordId], references: [id], onDelete: Cascade)
+
+  @@unique([canonicalPageId, localeCode, regionCode])
+  @@index([urlRecordId])
+  @@map("localization_variants")
+}
+
+model PageStateSnapshot {
+  id                 String        @id @default(uuid())
+  canonicalPageId    String        @map("canonical_page_id")
+  snapshotDate       DateTime      @map("snapshot_date") @db.Date
+  title              String?
+  metaTitle          String?       @map("meta_title")
+  metaDescription    String?       @map("meta_description")
+  h1                 String?
+  templateId         String?       @map("template_id")
+  contentHash        String?       @map("content_hash")
+  indexabilityStatus String?       @map("indexability_status")
+  internalLinkCount  Int?          @map("internal_link_count")
+  crawlDepth         Int?          @map("crawl_depth")
+  wordCount          Int?          @map("word_count")
+  schemaJson         Json?         @map("schema_json")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  canonicalPage      CanonicalPage @relation(fields: [canonicalPageId], references: [id], onDelete: Cascade)
+  template           Template?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@unique([canonicalPageId, snapshotDate])
+  @@index([snapshotDate])
+  @@map("page_state_snapshots")
+}
+
+model PageMetricDaily {
+  id                      String        @id @default(uuid())
+  propertyId              String        @map("property_id")
+  canonicalPageId         String        @map("canonical_page_id")
+  date                    DateTime      @db.Date
+  sessions                Decimal?      @db.Decimal(18, 4)
+  users                   Decimal?      @db.Decimal(18, 4)
+  entrances               Decimal?      @db.Decimal(18, 4)
+  engagementRate          Decimal?      @map("engagement_rate") @db.Decimal(10, 6)
+  avgEngagementSeconds    Decimal?      @map("avg_engagement_seconds") @db.Decimal(18, 4)
+  ctaClicks               Decimal?      @map("cta_clicks") @db.Decimal(18, 4)
+  formStarts              Decimal?      @map("form_starts") @db.Decimal(18, 4)
+  formCompletions         Decimal?      @map("form_completions") @db.Decimal(18, 4)
+  conversionCount         Decimal?      @map("conversion_count") @db.Decimal(18, 4)
+  conversionRate          Decimal?      @map("conversion_rate") @db.Decimal(10, 6)
+  assistedConversionValue Decimal?      @map("assisted_conversion_value") @db.Decimal(18, 4)
+  revenueInfluence        Decimal?      @map("revenue_influence") @db.Decimal(18, 4)
+  organicClicks           Decimal?      @map("organic_clicks") @db.Decimal(18, 4)
+  organicImpressions      Decimal?      @map("organic_impressions") @db.Decimal(18, 4)
+  avgPosition             Decimal?      @map("avg_position") @db.Decimal(10, 4)
+  ctr                     Decimal?      @db.Decimal(10, 6)
+  pageSpeedScore          Decimal?      @map("page_speed_score") @db.Decimal(10, 4)
+  cwvLcp                  Decimal?      @map("cwv_lcp") @db.Decimal(10, 4)
+  cwvCls                  Decimal?      @map("cwv_cls") @db.Decimal(10, 6)
+  cwvInp                  Decimal?      @map("cwv_inp") @db.Decimal(10, 4)
+  trustScore              Decimal?      @map("trust_score") @db.Decimal(10, 6)
+  createdAt               DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  property                Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  canonicalPage           CanonicalPage @relation(fields: [canonicalPageId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, canonicalPageId, date])
+  @@index([propertyId, date])
+  @@index([canonicalPageId, date])
+  @@map("page_metric_daily")
+}
+
+model QueryMetricDaily {
+  id              String         @id @default(uuid())
+  propertyId      String         @map("property_id")
+  canonicalPageId String?        @map("canonical_page_id")
+  queryText       String         @map("query_text")
+  date            DateTime       @db.Date
+  clicks          Decimal?       @db.Decimal(18, 4)
+  impressions     Decimal?       @db.Decimal(18, 4)
+  ctr             Decimal?       @db.Decimal(10, 6)
+  avgPosition     Decimal?       @map("avg_position") @db.Decimal(10, 4)
+  countryCode     String?        @map("country_code")
+  deviceType      String?        @map("device_type")
+  property        Property       @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  canonicalPage   CanonicalPage? @relation(fields: [canonicalPageId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId, date])
+  @@index([canonicalPageId, date])
+  @@index([propertyId, queryText, date])
+  @@map("query_metric_daily")
+}
+
+model ConversionDefinition {
+  id               String                        @id @default(uuid())
+  propertyId       String                        @map("property_id")
+  name             String
+  conversionType   ConversionType                @map("conversion_type")
+  status           ConversionDefinitionStatus    @default(draft)
+  currentVersionId String?                       @unique @map("current_version_id")
+  createdAt        DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime                      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  property         Property                      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  currentVersion   ConversionDefinitionVersion?  @relation("CurrentConversionDefinitionVersion", fields: [currentVersionId], references: [id])
+  versions         ConversionDefinitionVersion[]
+
+  @@unique([propertyId, name])
+  @@index([propertyId, status])
+  @@map("conversion_definitions")
+}
+
+model ConversionDefinitionVersion {
+  id                     String                @id @default(uuid())
+  conversionDefinitionId String                @map("conversion_definition_id")
+  versionNumber          Int                   @map("version_number")
+  eventName              String                @map("event_name")
+  matchingRulesJson      Json?                 @map("matching_rules_json")
+  externalFlowRulesJson  Json?                 @map("external_flow_rules_json")
+  exclusionRulesJson     Json?                 @map("exclusion_rules_json")
+  attributionNotes       String?               @map("attribution_notes")
+  effectiveFrom          DateTime              @map("effective_from") @db.Timestamptz(6)
+  effectiveTo            DateTime?             @map("effective_to") @db.Timestamptz(6)
+  createdByUserId        String?               @map("created_by_user_id")
+  createdAt              DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  conversionDefinition   ConversionDefinition  @relation(fields: [conversionDefinitionId], references: [id], onDelete: Cascade)
+  createdByUser          User?                 @relation(fields: [createdByUserId], references: [id])
+  currentForDefinition   ConversionDefinition? @relation("CurrentConversionDefinitionVersion")
+
+  @@unique([conversionDefinitionId, versionNumber])
+  @@index([effectiveFrom, effectiveTo])
+  @@map("conversion_definition_versions")
 }
 
 model ReleaseAnnotation {
-  id          String   @id @default(uuid())
-  propertyId  String
-  eventType   String
-  title       String
-  description String?
-  startedAt   DateTime
-  createdAt   DateTime @default(now())
-  property    Property @relation(fields: [propertyId], references: [id])
+  id               String            @id @default(uuid())
+  propertyId       String            @map("property_id")
+  eventType        ReleaseEventType  @map("event_type")
+  title            String
+  description      String?
+  relatedScopeType ReleaseScopeType? @map("related_scope_type")
+  relatedScopeId   String?           @map("related_scope_id")
+  startedAt        DateTime          @map("started_at") @db.Timestamptz(6)
+  endedAt          DateTime?         @map("ended_at") @db.Timestamptz(6)
+  source           String?
+  createdByUserId  String?           @map("created_by_user_id")
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  property         Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  createdByUser    User?             @relation("ReleaseCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@index([propertyId, startedAt])
+  @@index([propertyId, relatedScopeType, relatedScopeId])
+  @@map("release_events")
+}
+
+model Experiment {
+  id               String              @id @default(uuid())
+  propertyId       String              @map("property_id")
+  title            String
+  status           ExperimentStatus
+  relatedScopeType ExperimentScopeType @map("related_scope_type")
+  relatedScopeId   String              @map("related_scope_id")
+  hypothesis       String?
+  variantNotes     String?             @map("variant_notes")
+  ownerUserId      String?             @map("owner_user_id")
+  startedAt        DateTime?           @map("started_at") @db.Timestamptz(6)
+  endedAt          DateTime?           @map("ended_at") @db.Timestamptz(6)
+  outcome          ExperimentOutcome   @default(pending)
+  learnings        String?
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  property         Property            @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  ownerUser        User?               @relation("ExperimentOwner", fields: [ownerUserId], references: [id])
+
+  @@index([propertyId, status])
+  @@index([propertyId, relatedScopeType, relatedScopeId])
+  @@map("experiments")
+}
+
+model Recommendation {
+  id                              String                          @id @default(uuid())
+  propertyId                      String                          @map("property_id")
+  recommendationType              RecommendationType              @default(investigate) @map("recommendation_type")
+  domain                          RecommendationDomain            @default(technical)
+  category                        String? // legacy compatibility
+  relatedScopeType                RecommendationScopeType         @default(property) @map("related_scope_type")
+  relatedScopeId                  String                          @map("related_scope_id")
+  title                           String
+  summary                         String?
+  whyItMatters                    String?                         @map("why_it_matters")
+  suggestedAction                 String?                         @map("suggested_action")
+  evidenceJson                    Json?                           @map("evidence_json")
+  sourceEvidenceJson              Json?                           @map("source_evidence_json") // legacy compatibility
+  impactScore                     Decimal                         @default(0) @map("impact_score") @db.Decimal(10, 4)
+  actionabilityScore              Decimal                         @default(0) @map("actionability_score") @db.Decimal(10, 4)
+  trustScore                      Decimal                         @default(0) @map("trust_score") @db.Decimal(10, 6)
+  confidenceScore                 Decimal                         @default(0) @map("confidence_score") @db.Decimal(10, 6)
+  severity                        SeverityLevel                   @default(medium)
+  estimatedEffort                 EffortSize?                     @map("estimated_effort")
+  expectedTimeToImpactDays        Int?                            @map("expected_time_to_impact_days")
+  reversibilityRisk               ReversibilityRisk?              @map("reversibility_risk")
+  dependencyFlagsJson             Json?                           @map("dependency_flags_json")
+  status                          RecommendationStatus            @default(new)
+  archivedAt                      DateTime?                       @map("archived_at") @db.Timestamptz(6)
+  ownerTeam                       String?                         @map("owner_team")
+  ownerUserId                     String?                         @map("owner_user_id")
+  dueDate                         DateTime?                       @map("due_date") @db.Date
+  linkedTicketRef                 String?                         @map("linked_ticket_ref")
+  approvalState                   ApprovalState                   @default(none) @map("approval_state")
+  implementationVerificationState RecommendationVerificationState @default(not_started) @map("implementation_verification_state")
+  generatedAt                     DateTime                        @default(now()) @map("generated_at") @db.Timestamptz(6)
+  createdAt                       DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                       DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  property                        Property                        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  ownerUser                       User?                           @relation("RecommendationOwner", fields: [ownerUserId], references: [id])
+
+  @@index([propertyId, status])
+  @@index([propertyId, status, dueDate])
+  @@index([propertyId, severity])
+  @@index([propertyId, domain])
+  @@index([propertyId, relatedScopeType, relatedScopeId])
+  @@map("recommendations")
+}
+
+model Report {
+  id                String            @id @default(uuid())
+  propertyId        String            @map("property_id")
+  reportType        ReportType        @map("report_type")
+  title             String
+  dateRangeStart    DateTime          @map("date_range_start") @db.Date
+  dateRangeEnd      DateTime          @map("date_range_end") @db.Date
+  audiencePreset    String?           @map("audience_preset")
+  summaryMarkdown   String?           @map("summary_markdown")
+  status            ReportStatus      @default(draft)
+  generatedBy       ReportGeneratedBy @default(system) @map("generated_by")
+  generatedByUserId String?           @map("generated_by_user_id")
+  approvedByUserId  String?           @map("approved_by_user_id")
+  sentAt            DateTime?         @map("sent_at") @db.Timestamptz(6)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  property          Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  generatedByUser   User?             @relation("ReportGeneratedBy", fields: [generatedByUserId], references: [id])
+  approvedByUser    User?             @relation("ReportApprovedBy", fields: [approvedByUserId], references: [id])
+
+  @@index([propertyId, status])
+  @@index([propertyId, reportType])
+  @@index([sentAt])
+  @@map("reports")
+}
+
+model Alert {
+  id               String          @id @default(uuid())
+  propertyId       String          @map("property_id")
+  alertType        AlertType       @default(traffic_anomaly) @map("alert_type")
+  type             String? // legacy compatibility
+  relatedScopeType AlertScopeType? @map("related_scope_type")
+  relatedScopeId   String?         @map("related_scope_id")
+  severity         AlertSeverity
+  title            String
+  message          String
+  body             String? // legacy compatibility
+  evidenceJson     Json?           @map("evidence_json")
+  confidenceScore  Decimal?        @map("confidence_score") @db.Decimal(10, 6)
+  dedupeKey        String?         @map("dedupe_key")
+  status           AlertStatus     @default(open)
+  triggeredAt      DateTime        @default(now()) @map("triggered_at") @db.Timestamptz(6)
+  resolvedAt       DateTime?       @map("resolved_at") @db.Timestamptz(6)
+  property         Property        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, status])
+  @@index([propertyId, status, triggeredAt])
+  @@index([propertyId, severity])
+  @@index([propertyId, triggeredAt])
+  @@index([propertyId, dedupeKey])
+  @@map("alerts")
 }
 
 model AuditLogEvent {
-  id          String             @id @default(uuid())
-  workspaceId String
-  actorUserId String?
-  actorType   AuditActorType     @default(user)
-  category    AuditEventCategory
-  eventType   String
-  targetType  String?
-  targetId    String?
-  metadataJson Json?
-  requestId   String?
-  ipAddress   String?
-  userAgent   String?
-  occurredAt  DateTime           @default(now())
-  createdAt   DateTime           @default(now())
-  workspace   Workspace          @relation(fields: [workspaceId], references: [id])
-  actorUser   User?              @relation("AuditActorUser", fields: [actorUserId], references: [id])
+  id           String              @id @default(uuid())
+  workspaceId  String              @map("workspace_id")
+  propertyId   String?             @map("property_id")
+  actorUserId  String?             @map("actor_user_id")
+  actorType    AuditActorType      @default(user) @map("actor_type")
+  actionType   String?             @map("action_type")
+  category     AuditEventCategory?
+  eventType    String              @map("event_type")
+  targetType   String?             @map("target_type")
+  targetId     String?             @map("target_id")
+  metadataJson Json?               @map("metadata_json")
+  requestId    String?             @map("request_id")
+  ipAddress    String?             @map("ip_address")
+  userAgent    String?             @map("user_agent")
+  occurredAt   DateTime            @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace    Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  property     Property?           @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  actorUser    User?               @relation("AuditActorUser", fields: [actorUserId], references: [id])
 
   @@index([workspaceId, occurredAt])
   @@index([workspaceId, category])
   @@index([workspaceId, eventType])
   @@index([workspaceId, targetType, targetId])
   @@index([workspaceId, actorUserId])
+  @@index([workspaceId, requestId])
+  @@index([propertyId, occurredAt])
+  @@map("audit_logs")
 }
 
 enum AuthProvider {
@@ -236,6 +735,13 @@ enum UserStatus {
   active
   invited
   suspended
+}
+
+enum WorkspacePlanTier {
+  starter
+  growth
+  pro
+  enterprise
 }
 
 enum WorkspaceStatus {
@@ -255,9 +761,24 @@ enum MembershipRole {
 }
 
 enum PropertyEnvironment {
+  prod
+  stage
   sandbox
-  staging
-  production
+}
+
+enum PropertyBusinessModel {
+  lead_gen
+  trial
+  hybrid
+  ecommerce_like
+  other
+}
+
+enum PropertyStatus {
+  draft
+  active
+  paused
+  archived
 }
 
 enum IntegrationProvider {
@@ -265,6 +786,16 @@ enum IntegrationProvider {
   gsc
   sitemap
   crawler
+  wordpress
+  hubspot
+  other
+}
+
+enum IntegrationAuthType {
+  oauth
+  api_key
+  service_account
+  manual
 }
 
 enum IntegrationStatus {
@@ -272,6 +803,258 @@ enum IntegrationStatus {
   warning
   error
   syncing
+  disconnected
+}
+
+enum DataSourceHealthStatus {
+  healthy
+  stale
+  partial
+  error
+}
+
+enum DataScopeType {
+  property
+  page
+  template
+  metric
+}
+
+enum AnnotationScopeType {
+  property
+  page
+  template
+  metric
+  report
+}
+
+enum AnnotationType {
+  tracking_change
+  consent_issue
+  source_conflict
+  caveat
+  outage
+}
+
+enum AnnotationSeverity {
+  info
+  warning
+  critical
+}
+
+enum PageGroupType {
+  structural
+  funnel
+  business_line
+  owner
+  priority
+}
+
+enum IndexabilityStatus {
+  indexable
+  noindex
+  blocked
+  unknown
+}
+
+enum PriorityTier {
+  p0
+  p1
+  p2
+  p3
+}
+
+enum CanonicalPageStatus {
+  active
+  retired
+  redirected
+  draft_like
+}
+
+enum ConversionType {
+  primary
+  secondary
+  assist
+  revenue
+}
+
+enum ConversionDefinitionStatus {
+  active
+  retired
+  draft
+}
+
+enum ReleaseEventType {
+  deploy
+  cms_publish
+  campaign_launch
+  tracking_change
+  migration
+  manual
+}
+
+enum ReleaseScopeType {
+  property
+  page
+  template
+  page_group
+}
+
+enum ExperimentStatus {
+  planned
+  active
+  paused
+  complete
+  cancelled
+}
+
+enum ExperimentScopeType {
+  page
+  template
+  page_group
+}
+
+enum ExperimentOutcome {
+  win
+  loss
+  inconclusive
+  pending
+}
+
+enum RecommendationType {
+  fix
+  improve
+  test
+  refresh
+  consolidate
+  investigate
+  monitor
+  validate
+  migrate
+}
+
+enum RecommendationDomain {
+  seo
+  cro
+  content
+  technical
+  analytics_governance
+  trust
+  migration
+  reporting
+}
+
+enum RecommendationScopeType {
+  page
+  template
+  page_group
+  property
+}
+
+enum SeverityLevel {
+  low
+  medium
+  high
+  critical
+}
+
+enum EffortSize {
+  xs
+  s
+  m
+  l
+  xl
+}
+
+enum ReversibilityRisk {
+  low
+  medium
+  high
+}
+
+enum RecommendationStatus {
+  new
+  triaged
+  accepted
+  rejected
+  planned
+  in_progress
+  awaiting_validation
+  validated
+  reopened
+  not_applicable
+  blocked
+  archived
+}
+
+enum ApprovalState {
+  none
+  pending
+  approved
+  rejected
+}
+
+enum RecommendationVerificationState {
+  not_started
+  pending
+  passed
+  failed
+}
+
+enum ReportType {
+  weekly
+  seo_monthly
+  cro_monthly
+  content_refresh
+  technical
+  leadership
+  custom
+}
+
+enum ReportStatus {
+  draft
+  pending_approval
+  approved
+  sent
+  failed
+}
+
+enum ReportGeneratedBy {
+  system
+  user
+  ai_assisted
+}
+
+enum AlertType {
+  traffic_anomaly
+  conversion_anomaly
+  ranking_drop
+  indexing_issue
+  page_speed_regression
+  tracking_failure
+  content_change
+  crawl_spike
+  release_regression
+}
+
+enum AlertScopeType {
+  property
+  page
+  template
+  page_group
+}
+
+enum AlertSeverity {
+  info
+  warning
+  critical
+}
+
+enum AlertStatus {
+  open
+  acknowledged
+  resolved
+  suppressed
 }
 
 enum IdentityProviderType {

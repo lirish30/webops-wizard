@@ -9,6 +9,7 @@
     "dev": "turbo run dev --parallel",
     "db:migration:check": "pnpm --filter @webops-wizard/db db:migration:check",
     "db:schema:validate": "pnpm --filter @webops-wizard/db db:schema:validate",
+    "db:seed": "pnpm --filter @webops-wizard/db db:seed",
     "lint": "turbo run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
