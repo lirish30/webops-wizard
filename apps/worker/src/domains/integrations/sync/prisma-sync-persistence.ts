@@ -30,11 +30,7 @@ export class PrismaSyncPersistence implements SyncPersistence {
           finishedAt: run.finishedAt,
           freshnessMetadataJson: toInputJson(run.freshnessMetadataJson),
           coverageMetadataJson: toInputJson(run.coverageMetadataJson),
-          healthMetadataJson: toInputJson({
-            status: run.status,
-            partialFailure: run.partialFailure,
-            issueCount: run.issues.length
-          }),
+          healthMetadataJson: toInputJson(run.healthMetadataJson),
           issues: {
             create: run.issues.map((issue) => ({
               segment: issue.segment,
@@ -72,7 +68,12 @@ export class PrismaSyncPersistence implements SyncPersistence {
             ? "connected"
             : run.status === "partial_failed"
               ? "warning"
-              : "error"
+              : "error",
+        ...(run.connectionUpdates?.configJson !== undefined
+          ? {
+              configJson: run.connectionUpdates.configJson as Prisma.InputJsonValue
+            }
+          : {})
       }
     });
 
@@ -83,15 +84,15 @@ export class PrismaSyncPersistence implements SyncPersistence {
           integrationConnectionId: run.integrationConnectionId,
           sourceName: this.connection.provider,
           healthStatus:
-            run.status === "success"
+            run.healthMetadataJson.status === "success"
               ? "healthy"
-              : run.status === "partial_failed"
+              : run.healthMetadataJson.status === "partial_failed"
                 ? "partial"
                 : "error",
-          freshnessScore: run.freshnessMetadataJson.withinSla ? 1 : 0,
-          coverageScore: run.coverageMetadataJson.ratio,
-          reliabilityScore: run.status === "failed" ? 0 : 1,
-          issueCount: run.issues.length,
+          freshnessScore: run.healthMetadataJson.withinSla ? 1 : 0,
+          coverageScore: run.healthMetadataJson.coverageRatio,
+          reliabilityScore: run.healthMetadataJson.status === "failed" ? 0 : 1,
+          issueCount: run.healthMetadataJson.issueCount,
           measuredAt: run.finishedAt
         }
       });

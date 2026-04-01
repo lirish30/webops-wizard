@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InMemoryCredentialStore } from "./credentials/in-memory-credential-store";
 import type {
@@ -16,7 +16,28 @@ import {
   InMemorySyncPersistence,
   runConnectorSync
 } from "./sync/sync-runner";
+import { PrismaSyncPersistence } from "./sync/prisma-sync-persistence";
 import { buildDueSyncJobs } from "./sync/scheduler";
+
+const prismaMockFns = vi.hoisted(() => ({
+  connectorSyncRunCreate: vi.fn(),
+  integrationConnectionUpdate: vi.fn(),
+  dataSourceHealthCreate: vi.fn()
+}));
+
+vi.mock("@webops-wizard/db", () => ({
+  prisma: {
+    connectorSyncRun: {
+      create: prismaMockFns.connectorSyncRunCreate
+    },
+    integrationConnection: {
+      update: prismaMockFns.integrationConnectionUpdate
+    },
+    dataSourceHealth: {
+      create: prismaMockFns.dataSourceHealthCreate
+    }
+  }
+}));
 
 function createTestConnector(
   sync: ConnectorModule["sync"]
@@ -88,6 +109,16 @@ function createCapturingLogger() {
     }
   };
 }
+
+beforeEach(() => {
+  prismaMockFns.connectorSyncRunCreate.mockReset();
+  prismaMockFns.integrationConnectionUpdate.mockReset();
+  prismaMockFns.dataSourceHealthCreate.mockReset();
+
+  prismaMockFns.connectorSyncRunCreate.mockResolvedValue({});
+  prismaMockFns.integrationConnectionUpdate.mockResolvedValue({});
+  prismaMockFns.dataSourceHealthCreate.mockResolvedValue({});
+});
 
 describe("connector registry", () => {
   it("resolves registered providers and rejects unknown providers", () => {
@@ -756,6 +787,97 @@ describe("sync runner", () => {
         attemptCount: 2,
         retryCount: 1
       }
+    });
+  });
+});
+
+describe("prisma sync persistence", () => {
+  it("persists the full normalized health summary on stored runs", async () => {
+    const connection = createTestConnection({ id: "ic_prisma_health" });
+    const persistence = new PrismaSyncPersistence(connection);
+    const runRecord = {
+      id: "run_prisma_health",
+      integrationConnectionId: connection.id,
+      status: "partial_failed" as const,
+      partialFailure: true,
+      partialFailureCount: 2,
+      trigger: "manual" as const,
+      startedAt: new Date("2026-04-01T03:00:00.000Z"),
+      finishedAt: new Date("2026-04-01T03:00:03.000Z"),
+      durationMs: 3000,
+      stale: true,
+      freshnessMetadataJson: {
+        latestDataAt: null,
+        checkedAt: "2026-04-01T03:00:00.000Z",
+        lagMinutes: null,
+        withinSla: false
+      },
+      coverageMetadataJson: {
+        expectedSegments: 3,
+        succeededSegments: 1,
+        ratio: 1 / 3,
+        missingSegments: ["pages", "queries"]
+      },
+      health: {
+        status: "partial_failed" as const,
+        partialFailure: true,
+        partialFailureCount: 2,
+        issueCount: 7,
+        attemptCount: 3,
+        retryCount: 2,
+        rateLimitCount: 1,
+        durationMs: 3000,
+        stale: true,
+        withinSla: false,
+        coverageRatio: 1 / 3,
+        expectedSegments: 3,
+        succeededSegments: 1,
+        missingSegments: ["pages", "queries"]
+      },
+      healthMetadataJson: {
+        status: "partial_failed" as const,
+        partialFailure: true,
+        partialFailureCount: 2,
+        issueCount: 7,
+        attemptCount: 3,
+        retryCount: 2,
+        rateLimitCount: 1,
+        durationMs: 3000,
+        stale: true,
+        withinSla: false,
+        coverageRatio: 1 / 3,
+        expectedSegments: 3,
+        succeededSegments: 1,
+        missingSegments: ["pages", "queries"]
+      },
+      issues: [
+        {
+          segment: "pages",
+          code: "UPSTREAM_UNAVAILABLE",
+          message: "pages unavailable",
+          retryable: true
+        }
+      ]
+    };
+
+    await persistence.writeRun(runRecord);
+
+    expect(prismaMockFns.connectorSyncRunCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        id: runRecord.id,
+        integrationConnectionId: connection.id,
+        healthMetadataJson: runRecord.healthMetadataJson
+      })
+    });
+    expect(prismaMockFns.dataSourceHealthCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        integrationConnectionId: connection.id,
+        healthStatus: "partial",
+        freshnessScore: 0,
+        coverageScore: runRecord.healthMetadataJson.coverageRatio,
+        reliabilityScore: 1,
+        issueCount: runRecord.healthMetadataJson.issueCount
+      })
     });
   });
 });
