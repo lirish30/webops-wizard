@@ -26,7 +26,7 @@ export type RetryObserverEvent =
     };
 
 export interface RetryObserver {
-  onEvent(event: RetryObserverEvent): void;
+  onEvent(event: RetryObserverEvent): void | Promise<void>;
 }
 
 export class ConnectorExecutionError extends Error {
@@ -85,13 +85,20 @@ export async function runWithRetry<T>(
     } catch (error) {
       lastError = error;
       const retryable = isRetryableError(error);
+      const attemptFailedEvent: RetryObserverEvent = error instanceof ConnectorExecutionError
+        ? {
+            type: "attempt_failed",
+            attempt,
+            retryable,
+            code: error.code
+          }
+        : {
+            type: "attempt_failed",
+            attempt,
+            retryable
+          };
 
-      emitObserverEvent(observer, {
-        type: "attempt_failed",
-        attempt,
-        code: error instanceof ConnectorExecutionError ? error.code : undefined,
-        retryable
-      });
+      emitObserverEvent(observer, attemptFailedEvent);
 
       if (retryable && error.code === "RATE_LIMIT") {
         emitObserverEvent(observer, {
