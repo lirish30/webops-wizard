@@ -243,6 +243,49 @@ function safeError(
   }
 }
 
+function logTerminalRunEvent(input: {
+  logger: StructuredLogger;
+  logContext: {
+    runId: string;
+    integrationConnectionId: string;
+    workspaceId: string;
+    provider: ConnectorConnectionContext["provider"];
+    trigger: SyncTrigger;
+  };
+  status: ConnectorSyncRunStatus;
+  partialFailure: boolean;
+  partialFailureCount: number;
+  issueCount: number;
+  attemptCount: number;
+  retryCount: number;
+  rateLimitCount: number;
+  durationMs: number;
+  stale: boolean;
+}): void {
+  const entry = {
+    ...(input.status === "failed"
+      ? { event: "connector_sync_failed" }
+      : { event: "connector_sync_completed" }),
+    ...input.logContext,
+    status: input.status,
+    partialFailure: input.partialFailure,
+    partialFailureCount: input.partialFailureCount,
+    issueCount: input.issueCount,
+    attemptCount: input.attemptCount,
+    retryCount: input.retryCount,
+    rateLimitCount: input.rateLimitCount,
+    durationMs: input.durationMs,
+    stale: input.stale
+  };
+
+  if (input.status === "failed") {
+    safeError(input.logger, entry);
+    return;
+  }
+
+  safeInfo(input.logger, entry);
+}
+
 export async function runConnectorSync(
   input: RunConnectorSyncInput
 ): Promise<RunConnectorSyncResult> {
@@ -381,9 +424,9 @@ export async function runConnectorSync(
 
     await input.persistence.writeRun(runRecord);
 
-    safeInfo(logger, {
-      event: "connector_sync_completed",
-      ...logContext,
+    logTerminalRunEvent({
+      logger,
+      logContext,
       status,
       partialFailure,
       partialFailureCount,

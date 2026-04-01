@@ -70,16 +70,20 @@ function createTestConnection(
 function createCapturingLogger() {
   const infoEntries: Array<Record<string, unknown>> = [];
   const errorEntries: Array<Record<string, unknown>> = [];
+  const entries: Array<{ level: "info" | "error"; entry: Record<string, unknown> }> = [];
 
   return {
+    entries,
     infoEntries,
     errorEntries,
     logger: {
       info(entry: Record<string, unknown>) {
         infoEntries.push(entry);
+        entries.push({ level: "info", entry });
       },
       error(entry: Record<string, unknown>) {
         errorEntries.push(entry);
+        entries.push({ level: "error", entry });
       }
     }
   };
@@ -616,6 +620,64 @@ describe("sync runner", () => {
       rateLimitCount: 1
     });
     expect(errorEntries).toEqual([]);
+  });
+
+  it("logs terminal failed status when every returned segment fails", async () => {
+    const persistence = new InMemorySyncPersistence();
+    const store = new InMemoryCredentialStore();
+    const { entries, infoEntries, errorEntries, logger } = createCapturingLogger();
+
+    const result = await runConnectorSync({
+      connection: createTestConnection({ id: "ic_failed_result" }),
+      trigger: "manual",
+      now: new Date("2026-04-01T03:00:00.000Z"),
+      connector: createTestConnector(async () =>
+        createTestSyncResult({
+          latestDataAt: new Date("2026-04-01T02:30:00.000Z"),
+          segments: [
+            {
+              segment: "traffic",
+              status: "failed",
+              code: "UPSTREAM_UNAVAILABLE",
+              message: "traffic unavailable",
+              retryable: true
+            },
+            {
+              segment: "pages",
+              status: "failed",
+              code: "UPSTREAM_UNAVAILABLE",
+              message: "pages unavailable",
+              retryable: true
+            }
+          ]
+        })
+      ),
+      credentialStore: store,
+      persistence,
+      logger
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.health.status).toBe("failed");
+
+    const latestRun = persistence.getLatestRun("ic_failed_result");
+    expect(latestRun?.status).toBe("failed");
+    expect(latestRun?.health.status).toBe("failed");
+    expect(latestRun?.healthMetadataJson.status).toBe("failed");
+
+    expect(infoEntries.map((entry) => entry.event)).toEqual([
+      "connector_sync_started"
+    ]);
+    expect(errorEntries.map((entry) => entry.event)).toEqual([
+      "connector_sync_failed"
+    ]);
+    expect(entries.at(-1)).toMatchObject({
+      level: "error",
+      entry: {
+        event: "connector_sync_failed",
+        status: "failed"
+      }
+    });
   });
 });
 
