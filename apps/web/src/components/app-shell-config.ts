@@ -8,6 +8,12 @@ export type NavigationItem = {
 
 export const navigationItems: NavigationItem[] = [
   {
+    href: "/setup",
+    label: "Setup Wizard",
+    shortLabel: "SW",
+    description: "Guided onboarding, validation, and activation workflow"
+  },
+  {
     href: "/overview",
     label: "Overview",
     shortLabel: "OV",

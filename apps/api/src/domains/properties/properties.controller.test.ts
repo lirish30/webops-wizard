@@ -4,7 +4,7 @@ import { PropertiesController } from "./properties.controller";
 
 describe("PropertiesController", () => {
   it("constructs", () => {
-    const controller = new PropertiesController({} as never);
+    const controller = new PropertiesController({} as never, {} as never);
     expect(controller).toBeInstanceOf(PropertiesController);
   });
 });

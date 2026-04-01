@@ -10,6 +10,7 @@ describe("navigationItems", () => {
         label: item.label
       }))
     ).toEqual([
+      { href: "/setup", label: "Setup Wizard" },
       { href: "/overview", label: "Overview" },
       { href: "/pages", label: "Pages" },
       { href: "/recommendations", label: "Recommendations" },
