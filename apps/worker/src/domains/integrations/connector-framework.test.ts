@@ -1,24 +1,103 @@
 import { describe, expect, it } from "vitest";
 
 import { InMemoryCredentialStore } from "./credentials/in-memory-credential-store";
+import type {
+  ConnectorModule,
+  ConnectorSyncResult
+} from "./connectors/connector.types";
 import {
   ConnectorExecutionError,
   createRetryPolicy,
   runWithRetry
 } from "./sync/retry";
 import { createConnectorRegistry } from "./connectors/connector.registry";
+import { createCrawlerConnector } from "./connectors/crawler/crawler.connector";
 import { createGa4Connector } from "./connectors/ga4/ga4.connector";
+import { createSitemapConnector } from "./connectors/sitemap/sitemap.connector";
 import {
   InMemorySyncPersistence,
   runConnectorSync
 } from "./sync/sync-runner";
 import { buildDueSyncJobs } from "./sync/scheduler";
 
+function createTestConnector(
+  sync: ConnectorModule["sync"]
+): ConnectorModule {
+  return {
+    provider: "ga4",
+    oauth: {
+      async refreshAccessToken() {
+        return {
+          accessToken: "token",
+          expiresAt: new Date("2026-04-01T00:00:00.000Z").toISOString()
+        };
+      }
+    },
+    sync
+  };
+}
+
+function createTestSyncResult(
+  overrides?: Partial<ConnectorSyncResult>
+): ConnectorSyncResult {
+  return {
+    fetchedAt: new Date("2026-04-01T02:55:00.000Z"),
+    latestDataAt: new Date("2026-04-01T02:45:00.000Z"),
+    segments: [
+      {
+        segment: "traffic",
+        status: "success",
+        recordsSynced: 10
+      }
+    ],
+    ...overrides
+  };
+}
+
+function createTestConnection(
+  overrides?: Partial<Parameters<typeof runConnectorSync>[0]["connection"]>
+) {
+  return {
+    id: "ic_test",
+    workspaceId: "ws_1",
+    propertyId: "prop_1",
+    provider: "ga4" as const,
+    credentialRef: null,
+    freshnessSlaMinutes: 60,
+    configJson: null,
+    ...overrides
+  };
+}
+
+function createCapturingLogger() {
+  const infoEntries: Array<Record<string, unknown>> = [];
+  const errorEntries: Array<Record<string, unknown>> = [];
+
+  return {
+    infoEntries,
+    errorEntries,
+    logger: {
+      info(entry: Record<string, unknown>) {
+        infoEntries.push(entry);
+      },
+      error(entry: Record<string, unknown>) {
+        errorEntries.push(entry);
+      }
+    }
+  };
+}
+
 describe("connector registry", () => {
   it("resolves registered providers and rejects unknown providers", () => {
-    const registry = createConnectorRegistry([createGa4Connector()]);
+    const registry = createConnectorRegistry([
+      createGa4Connector(),
+      createSitemapConnector(),
+      createCrawlerConnector()
+    ]);
 
     expect(registry.get("ga4").provider).toBe("ga4");
+    expect(registry.get("sitemap").provider).toBe("sitemap");
+    expect(registry.get("crawler").provider).toBe("crawler");
     expect(() => registry.get("gsc")).toThrowError(/No connector registered/);
   });
 });
@@ -289,7 +368,16 @@ describe("GA4 oauth hooks", () => {
 describe("sync runner", () => {
   it("stores partial failure with freshness and coverage metadata", async () => {
     const persistence = new InMemorySyncPersistence();
-    const connector = createGa4Connector();
+    const connector = createGa4Connector({
+      pageMetricsStore: {
+        async ingest() {
+          return {
+            recordsSynced: 2,
+            unresolvedPagePaths: []
+          };
+        }
+      }
+    });
     const store = new InMemoryCredentialStore();
 
     await store.put({
@@ -312,8 +400,10 @@ describe("sync runner", () => {
         credentialRef: "cred-ga4-2",
         freshnessSlaMinutes: 60,
         configJson: {
-          ga4PropertyId: "1234",
-          simulatedFailureSegments: ["conversions"]
+          selectedProperty: {
+            propertyId: "properties/1234",
+            displayName: "Primary property"
+          }
         }
       },
       trigger: "schedule",
@@ -324,14 +414,215 @@ describe("sync runner", () => {
       retryPolicy: createRetryPolicy({ maxAttempts: 2, baseDelayMs: 1 })
     });
 
-    expect(result.status).toBe("partial_failed");
-    expect(result.partialFailure).toBe(true);
-    expect(result.coverage.ratio).toBeCloseTo(2 / 3, 3);
-    expect(result.freshness.withinSla).toBe(true);
+    expect(result.status).toBe("success");
+    expect(result.partialFailure).toBe(false);
+    expect(result.coverage.ratio).toBe(1);
+    expect(result.freshness.withinSla).toBe(false);
 
     const latestRun = persistence.getLatestRun("ic_1");
-    expect(latestRun?.issues.length).toBe(1);
-    expect(latestRun?.issues[0]?.segment).toBe("conversions");
+    expect(latestRun?.issues.length).toBe(0);
+  });
+
+  it("records successful-run telemetry and health summaries", async () => {
+    const persistence = new InMemorySyncPersistence();
+    const store = new InMemoryCredentialStore();
+    const { infoEntries, errorEntries, logger } = createCapturingLogger();
+
+    const result = await runConnectorSync({
+      connection: createTestConnection({ id: "ic_success" }),
+      trigger: "schedule",
+      now: new Date("2026-04-01T03:00:00.000Z"),
+      connector: createTestConnector(async () =>
+        createTestSyncResult({
+          latestDataAt: new Date("2026-04-01T02:30:00.000Z"),
+          segments: [
+            { segment: "traffic", status: "success", recordsSynced: 8 },
+            { segment: "pages", status: "success", recordsSynced: 3 }
+          ]
+        })
+      ),
+      credentialStore: store,
+      persistence,
+      logger,
+      retryPolicy: createRetryPolicy({ maxAttempts: 2, baseDelayMs: 1 })
+    });
+
+    expect(result).toMatchObject({
+      status: "success",
+      partialFailure: false,
+      partialFailureCount: 0,
+      stale: false
+    });
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    expect(result.health).toMatchObject({
+      status: "success",
+      partialFailure: false,
+      partialFailureCount: 0,
+      issueCount: 0,
+      attemptCount: 1,
+      retryCount: 0,
+      rateLimitCount: 0,
+      stale: false,
+      withinSla: true,
+      coverageRatio: 1,
+      expectedSegments: 2,
+      succeededSegments: 2,
+      missingSegments: []
+    });
+    expect(result.health.durationMs).toBe(result.durationMs);
+
+    const latestRun = persistence.getLatestRun("ic_success");
+    expect(latestRun).toMatchObject({
+      partialFailureCount: 0,
+      stale: false,
+      health: result.health,
+      healthMetadataJson: result.health
+    });
+    expect(latestRun?.durationMs).toBe(result.durationMs);
+
+    expect(infoEntries.map((entry) => entry.event)).toEqual([
+      "connector_sync_started",
+      "connector_sync_completed"
+    ]);
+    expect(infoEntries[1]).toMatchObject({
+      event: "connector_sync_completed",
+      status: "success",
+      stale: false,
+      partialFailureCount: 0
+    });
+    expect(errorEntries).toEqual([]);
+  });
+
+  it("records partial failures and marks runs stale when no fresh data is available", async () => {
+    const persistence = new InMemorySyncPersistence();
+    const store = new InMemoryCredentialStore();
+    const { infoEntries, logger } = createCapturingLogger();
+
+    const result = await runConnectorSync({
+      connection: createTestConnection({ id: "ic_partial" }),
+      trigger: "manual",
+      now: new Date("2026-04-01T03:00:00.000Z"),
+      connector: createTestConnector(async () =>
+        createTestSyncResult({
+          latestDataAt: null,
+          segments: [
+            { segment: "traffic", status: "success", recordsSynced: 8 },
+            {
+              segment: "pages",
+              status: "failed",
+              code: "UPSTREAM_UNAVAILABLE",
+              message: "pages unavailable",
+              retryable: true
+            }
+          ]
+        })
+      ),
+      credentialStore: store,
+      persistence,
+      logger
+    });
+
+    expect(result).toMatchObject({
+      status: "partial_failed",
+      partialFailure: true,
+      partialFailureCount: 1,
+      stale: true
+    });
+    expect(result.health).toMatchObject({
+      status: "partial_failed",
+      partialFailure: true,
+      partialFailureCount: 1,
+      issueCount: 1,
+      attemptCount: 1,
+      retryCount: 0,
+      rateLimitCount: 0,
+      stale: true,
+      withinSla: false,
+      coverageRatio: 0.5,
+      expectedSegments: 2,
+      succeededSegments: 1,
+      missingSegments: ["pages"]
+    });
+
+    const latestRun = persistence.getLatestRun("ic_partial");
+    expect(latestRun).toMatchObject({
+      partialFailureCount: 1,
+      stale: true,
+      health: result.health,
+      healthMetadataJson: result.health
+    });
+    expect(latestRun?.issues).toMatchObject([
+      {
+        segment: "pages",
+        code: "UPSTREAM_UNAVAILABLE",
+        message: "pages unavailable",
+        retryable: true
+      }
+    ]);
+    expect(infoEntries[1]).toMatchObject({
+      event: "connector_sync_completed",
+      status: "partial_failed",
+      stale: true,
+      partialFailureCount: 1
+    });
+  });
+
+  it("tracks retry counts and rate-limit counts from retry observer events", async () => {
+    const persistence = new InMemorySyncPersistence();
+    const store = new InMemoryCredentialStore();
+    const { infoEntries, errorEntries, logger } = createCapturingLogger();
+    let attempt = 0;
+
+    const result = await runConnectorSync({
+      connection: createTestConnection({ id: "ic_retry" }),
+      trigger: "retry",
+      now: new Date("2026-04-01T03:00:00.000Z"),
+      connector: createTestConnector(async () => {
+        attempt += 1;
+
+        if (attempt === 1) {
+          throw new ConnectorExecutionError("slow down", {
+            code: "RATE_LIMIT",
+            retryable: true
+          });
+        }
+
+        return createTestSyncResult();
+      }),
+      credentialStore: store,
+      persistence,
+      logger,
+      retryPolicy: createRetryPolicy({ maxAttempts: 2, baseDelayMs: 1 })
+    });
+
+    expect(result.health).toMatchObject({
+      attemptCount: 2,
+      retryCount: 1,
+      rateLimitCount: 1
+    });
+    expect(infoEntries.map((entry) => entry.event)).toEqual([
+      "connector_sync_started",
+      "connector_sync_rate_limited",
+      "connector_sync_retry_scheduled",
+      "connector_sync_completed"
+    ]);
+    expect(infoEntries[1]).toMatchObject({
+      event: "connector_sync_rate_limited",
+      attempt: 1,
+      code: "RATE_LIMIT"
+    });
+    expect(infoEntries[2]).toMatchObject({
+      event: "connector_sync_retry_scheduled",
+      attempt: 1,
+      delayMs: 1
+    });
+    expect(infoEntries[3]).toMatchObject({
+      event: "connector_sync_completed",
+      attemptCount: 2,
+      retryCount: 1,
+      rateLimitCount: 1
+    });
+    expect(errorEntries).toEqual([]);
   });
 });
 
@@ -357,5 +648,49 @@ describe("scheduler", () => {
 
     expect(jobs).toHaveLength(1);
     expect(jobs[0]?.payload.integrationConnectionId).toBe("ic_due");
+  });
+
+  it("queues sitemap sync when cadence window has elapsed", () => {
+    const jobs = buildDueSyncJobs(
+      [
+        {
+          id: "ic_sitemap_due",
+          provider: "sitemap",
+          configJson: null,
+          lastSyncedAt: new Date("2026-04-01T00:00:00.000Z")
+        },
+        {
+          id: "ic_sitemap_not_due",
+          provider: "sitemap",
+          configJson: {
+            connectorSchedule: {
+              everyMinutes: 720
+            }
+          },
+          lastSyncedAt: new Date("2026-04-01T03:00:00.000Z")
+        }
+      ],
+      new Date("2026-04-01T06:01:00.000Z")
+    );
+
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.payload.integrationConnectionId).toBe("ic_sitemap_due");
+  });
+
+  it("queues crawler sync when cadence window has elapsed", () => {
+    const jobs = buildDueSyncJobs(
+      [
+        {
+          id: "ic_crawler_due",
+          provider: "crawler",
+          configJson: null,
+          lastSyncedAt: new Date("2026-04-01T00:00:00.000Z")
+        }
+      ],
+      new Date("2026-04-01T06:01:00.000Z")
+    );
+
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.payload.integrationConnectionId).toBe("ic_crawler_due");
   });
 });
