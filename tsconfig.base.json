@@ -20,6 +20,8 @@
       "@webops-wizard/config": ["packages/config/src/index.ts"],
       "@webops-wizard/config/*": ["packages/config/src/*"],
       "@webops-wizard/db": ["packages/db/src/index.ts"],
+      "@webops-wizard/integrations": ["packages/integrations/src/index.ts"],
+      "@webops-wizard/integrations/*": ["packages/integrations/src/*"],
       "@webops-wizard/types": ["packages/types/src/index.ts"],
       "@webops-wizard/types/*": ["packages/types/src/*"],
       "@webops-wizard/ui": ["packages/ui/src/index.ts"]

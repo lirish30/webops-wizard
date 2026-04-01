@@ -56,6 +56,7 @@ model Workspace {
   integrations IntegrationConnection[]
   connectorCredentials ConnectorCredential[]
   connectorSyncRuns    ConnectorSyncRun[]
+  searchConsoleSites   SearchConsoleSite[]
   auditEvents  AuditLogEvent[]
 
   @@index([ownerUserId])
@@ -252,6 +253,7 @@ model IntegrationConnection {
   createdByUser      User?               @relation("IntegrationCreatedBy", fields: [createdByUserId], references: [id])
   healthChecks       DataSourceHealth[]
   syncRuns           ConnectorSyncRun[]
+  searchConsoleSites SearchConsoleSite[]
 
   @@unique([workspaceId, propertyId, provider])
   @@index([workspaceId])
@@ -315,6 +317,25 @@ model ConnectorSyncRunIssue {
 
   @@index([runId, segment])
   @@map("connector_sync_run_issues")
+}
+
+model SearchConsoleSite {
+  id                      String                @id @default(uuid())
+  integrationConnectionId String                @map("integration_connection_id")
+  workspaceId             String                @map("workspace_id")
+  siteUrl                 String                @map("site_url")
+  displayName             String                @map("display_name")
+  permissionLevel         String?               @map("permission_level")
+  selected                Boolean               @default(false)
+  createdAt               DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  integrationConnection   IntegrationConnection @relation(fields: [integrationConnectionId], references: [id], onDelete: Cascade)
+  workspace               Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([integrationConnectionId, siteUrl])
+  @@index([workspaceId, integrationConnectionId])
+  @@index([integrationConnectionId, selected])
+  @@map("search_console_sites")
 }
 
 model DataSourceHealth {
@@ -464,6 +485,7 @@ model UrlRecord {
   firstSeenAt      DateTime?             @map("first_seen_at") @db.Timestamptz(6)
   lastSeenAt       DateTime?             @map("last_seen_at") @db.Timestamptz(6)
   source           String?
+  metadataJson     Json?                 @map("metadata_json")
   property         Property              @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   canonicalPage    CanonicalPage         @relation(fields: [canonicalPageId], references: [id], onDelete: Cascade)
   localizationRows LocalizationVariant[]
@@ -505,6 +527,11 @@ model PageStateSnapshot {
   crawlDepth         Int?          @map("crawl_depth")
   wordCount          Int?          @map("word_count")
   schemaJson         Json?         @map("schema_json")
+  statusCode         Int?          @map("status_code")
+  snapshotHtml       String?       @map("snapshot_html")
+  fetchMode          String?       @map("fetch_mode")
+  requestedUrl       String?       @map("requested_url")
+  finalUrl           String?       @map("final_url")
   createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   canonicalPage      CanonicalPage @relation(fields: [canonicalPageId], references: [id], onDelete: Cascade)
   template           Template?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
@@ -553,7 +580,7 @@ model PageMetricDaily {
 model QueryMetricDaily {
   id              String         @id @default(uuid())
   propertyId      String         @map("property_id")
-  canonicalPageId String?        @map("canonical_page_id")
+  canonicalPageId String         @map("canonical_page_id")
   queryText       String         @map("query_text")
   date            DateTime       @db.Date
   clicks          Decimal?       @db.Decimal(18, 4)
@@ -563,8 +590,9 @@ model QueryMetricDaily {
   countryCode     String?        @map("country_code")
   deviceType      String?        @map("device_type")
   property        Property       @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  canonicalPage   CanonicalPage? @relation(fields: [canonicalPageId], references: [id], onDelete: SetNull)
+  canonicalPage   CanonicalPage  @relation(fields: [canonicalPageId], references: [id], onDelete: Cascade)
 
+  @@unique([propertyId, canonicalPageId, queryText, date])
   @@index([propertyId, date])
   @@index([canonicalPageId, date])
   @@index([propertyId, queryText, date])

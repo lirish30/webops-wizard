@@ -1,8 +1,8 @@
 import { prisma } from "@webops-wizard/db";
 import {
-  createPlaceholderGa4Provider,
-  type Ga4DailyPageMetric,
-  type Ga4Provider
+  createPlaceholderGscProvider,
+  type GscDailyQueryMetric,
+  type GscProvider
 } from "../../../../../../../packages/integrations/src/index";
 
 import type {
@@ -12,42 +12,38 @@ import type {
 } from "../connector.types";
 import { ConnectorExecutionError } from "../../sync/retry";
 
-interface Ga4SelectedProperty {
-  propertyId: string;
+interface GscSelectedSite {
+  siteUrl: string;
   displayName?: string;
 }
 
-interface Ga4BackfillRequest {
+interface GscBackfillRequest {
   startDate: string;
   endDate: string;
   requestedAt?: string;
   requestedByUserId?: string;
 }
 
-interface Ga4Config {
+interface GscConfig {
   oauth?: Record<string, unknown>;
-  selectedProperty?: Ga4SelectedProperty;
-  availableProperties?: Array<Record<string, unknown>>;
-  pendingBackfill?: Ga4BackfillRequest | null;
+  selectedSite?: GscSelectedSite;
+  availableSites?: Array<Record<string, unknown>>;
+  pendingBackfill?: GscBackfillRequest | null;
   connectorSchedule?: {
     everyMinutes: number;
   };
   lookbackDays?: number;
-  simulatedFailureSegments?: string[];
 }
 
-export interface PageMetricsStore {
+export interface SearchConsoleMetricsStore {
   ingest(input: {
     propertyId: string;
-    rows: Ga4DailyPageMetric[];
+    rows: GscDailyQueryMetric[];
   }): Promise<{
-    recordsSynced: number;
-    unresolvedPagePaths: string[];
+    pageRecordsSynced: number;
+    queryRecordsSynced: number;
+    unresolvedPageUrls: string[];
   }>;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function normalizeUrlKey(urlString: string): string {
@@ -56,22 +52,22 @@ function normalizeUrlKey(urlString: string): string {
   return `${parsed.hostname}${pathname}`.toLowerCase() || parsed.hostname.toLowerCase();
 }
 
-function parseGa4Config(configJson: Record<string, unknown> | null): Ga4Config {
+function parseGscConfig(configJson: Record<string, unknown> | null): GscConfig {
   if (!configJson) {
     return {};
   }
 
-  return configJson as Ga4Config;
+  return configJson as GscConfig;
 }
 
 function buildRefreshedToken(now: Date): OAuthRefreshResult {
   return {
-    accessToken: `ga4-token-${now.getTime()}`,
+    accessToken: `gsc-token-${now.getTime()}`,
     expiresAt: new Date(now.getTime() + 60 * 60 * 1000).toISOString()
   };
 }
 
-function readDateWindow(config: Ga4Config, now: Date) {
+function readDateWindow(config: GscConfig, now: Date) {
   if (config.pendingBackfill) {
     return config.pendingBackfill;
   }
@@ -90,22 +86,24 @@ function parseIsoDay(value: string | null): Date | null {
   return value ? new Date(`${value}T00:00:00.000Z`) : null;
 }
 
-class PrismaPageMetricsStore implements PageMetricsStore {
+class PrismaSearchConsoleMetricsStore implements SearchConsoleMetricsStore {
   async ingest(input: {
     propertyId: string;
-    rows: Ga4DailyPageMetric[];
+    rows: GscDailyQueryMetric[];
   }): Promise<{
-    recordsSynced: number;
-    unresolvedPagePaths: string[];
+    pageRecordsSynced: number;
+    queryRecordsSynced: number;
+    unresolvedPageUrls: string[];
   }> {
     if (input.rows.length === 0) {
       return {
-        recordsSynced: 0,
-        unresolvedPagePaths: []
+        pageRecordsSynced: 0,
+        queryRecordsSynced: 0,
+        unresolvedPageUrls: []
       };
     }
 
-    const urlKeys = [...new Set(input.rows.map((row) => normalizeUrlKey(row.pagePath)))];
+    const urlKeys = [...new Set(input.rows.map((row) => normalizeUrlKey(row.pageUrl)))];
     const [canonicalPages, urlRecords] = await Promise.all([
       prisma.canonicalPage.findMany({
         where: {
@@ -137,72 +135,129 @@ class PrismaPageMetricsStore implements PageMetricsStore {
       canonicalByKey.set(urlRecord.normalizedUrlKey, urlRecord.canonicalPageId);
     }
 
-    let recordsSynced = 0;
-    const unresolvedPagePaths: string[] = [];
+    const unresolvedPageUrls = new Set<string>();
+    const pageRollups = new Map<
+      string,
+      {
+        canonicalPageId: string;
+        date: string;
+        clicks: number;
+        impressions: number;
+        weightedPosition: number;
+      }
+    >();
+    let queryRecordsSynced = 0;
 
     for (const row of input.rows) {
-      const canonicalPageId = canonicalByKey.get(normalizeUrlKey(row.pagePath));
+      const canonicalPageId = canonicalByKey.get(normalizeUrlKey(row.pageUrl));
       if (!canonicalPageId) {
-        unresolvedPagePaths.push(row.pagePath);
+        unresolvedPageUrls.add(row.pageUrl);
         continue;
       }
+
+      const impressions = row.impressions ?? 0;
+      const clicks = row.clicks ?? 0;
+      const avgPosition = row.avgPosition ?? 0;
+
+      await prisma.queryMetricDaily.upsert({
+        where: {
+          propertyId_canonicalPageId_queryText_date: {
+            propertyId: input.propertyId,
+            canonicalPageId,
+            queryText: row.query,
+            date: new Date(`${row.date}T00:00:00.000Z`)
+          }
+        },
+        update: {
+          clicks: row.clicks ?? null,
+          impressions: row.impressions ?? null,
+          ctr: row.ctr ?? null,
+          avgPosition: row.avgPosition ?? null
+        },
+        create: {
+          propertyId: input.propertyId,
+          canonicalPageId,
+          queryText: row.query,
+          date: new Date(`${row.date}T00:00:00.000Z`),
+          clicks: row.clicks ?? null,
+          impressions: row.impressions ?? null,
+          ctr: row.ctr ?? null,
+          avgPosition: row.avgPosition ?? null
+        }
+      });
+
+      queryRecordsSynced += 1;
+
+      const rollupKey = `${canonicalPageId}:${row.date}`;
+      const existing = pageRollups.get(rollupKey) ?? {
+        canonicalPageId,
+        date: row.date,
+        clicks: 0,
+        impressions: 0,
+        weightedPosition: 0
+      };
+
+      existing.clicks += clicks;
+      existing.impressions += impressions;
+      existing.weightedPosition += avgPosition * impressions;
+      pageRollups.set(rollupKey, existing);
+    }
+
+    for (const rollup of pageRollups.values()) {
+      const ctr =
+        rollup.impressions > 0 ? rollup.clicks / rollup.impressions : null;
+      const avgPosition =
+        rollup.impressions > 0 ? rollup.weightedPosition / rollup.impressions : null;
 
       await prisma.pageMetricDaily.upsert({
         where: {
           propertyId_canonicalPageId_date: {
             propertyId: input.propertyId,
-            canonicalPageId,
-            date: new Date(`${row.date}T00:00:00.000Z`)
+            canonicalPageId: rollup.canonicalPageId,
+            date: new Date(`${rollup.date}T00:00:00.000Z`)
           }
         },
         update: {
-          sessions: row.sessions ?? null,
-          users: row.users ?? null,
-          entrances: row.entrances ?? null,
-          engagementRate: row.engagementRate ?? null,
-          avgEngagementSeconds: row.avgEngagementSeconds ?? null,
-          conversionCount: row.conversionCount ?? null,
-          conversionRate: row.conversionRate ?? null
+          organicClicks: rollup.clicks,
+          organicImpressions: rollup.impressions,
+          ctr,
+          avgPosition
         },
         create: {
           propertyId: input.propertyId,
-          canonicalPageId,
-          date: new Date(`${row.date}T00:00:00.000Z`),
-          sessions: row.sessions ?? null,
-          users: row.users ?? null,
-          entrances: row.entrances ?? null,
-          engagementRate: row.engagementRate ?? null,
-          avgEngagementSeconds: row.avgEngagementSeconds ?? null,
-          conversionCount: row.conversionCount ?? null,
-          conversionRate: row.conversionRate ?? null
+          canonicalPageId: rollup.canonicalPageId,
+          date: new Date(`${rollup.date}T00:00:00.000Z`),
+          organicClicks: rollup.clicks,
+          organicImpressions: rollup.impressions,
+          ctr,
+          avgPosition
         }
       });
-
-      recordsSynced += 1;
     }
 
     return {
-      recordsSynced,
-      unresolvedPagePaths: [...new Set(unresolvedPagePaths)]
+      pageRecordsSynced: pageRollups.size,
+      queryRecordsSynced,
+      unresolvedPageUrls: [...unresolvedPageUrls]
     };
   }
 }
 
-export function createGa4Connector(input?: {
-  provider?: Ga4Provider;
-  pageMetricsStore?: PageMetricsStore;
+export function createGscConnector(input?: {
+  provider?: GscProvider;
+  metricsStore?: SearchConsoleMetricsStore;
 }): ConnectorModule {
-  const provider = input?.provider ?? createPlaceholderGa4Provider();
-  const pageMetricsStore = input?.pageMetricsStore ?? new PrismaPageMetricsStore();
+  const provider = input?.provider ?? createPlaceholderGscProvider();
+  const metricsStore = input?.metricsStore ?? new PrismaSearchConsoleMetricsStore();
 
   return {
-    provider: "ga4",
+    provider: "gsc",
     oauth: {
       async refreshAccessToken({ credentialReference, credentialStore, now }) {
         const credential = await credentialStore.get(credentialReference);
 
         if (!credential) {
-          throw new ConnectorExecutionError("Missing GA4 credential", {
+          throw new ConnectorExecutionError("Missing GSC credential", {
             code: "MISSING_CREDENTIAL",
             retryable: false
           });
@@ -210,7 +265,7 @@ export function createGa4Connector(input?: {
 
         const refreshToken = credential.payload.refreshToken;
         if (typeof refreshToken !== "string" || refreshToken.length === 0) {
-          throw new ConnectorExecutionError("Missing GA4 refresh token", {
+          throw new ConnectorExecutionError("Missing GSC refresh token", {
             code: "MISSING_REFRESH_TOKEN",
             retryable: false
           });
@@ -229,24 +284,24 @@ export function createGa4Connector(input?: {
       }
     },
     async sync({ connection, now, credentialStore }) {
-      const config = parseGa4Config(connection.configJson);
+      const config = parseGscConfig(connection.configJson);
 
       if (!connection.propertyId) {
-        throw new ConnectorExecutionError("GA4 sync requires a property binding", {
+        throw new ConnectorExecutionError("GSC sync requires a property binding", {
           code: "MISSING_PROPERTY_BINDING",
           retryable: false
         });
       }
 
-      if (!config.selectedProperty?.propertyId) {
-        throw new ConnectorExecutionError("GA4 property selection is missing", {
-          code: "MISSING_GA4_PROPERTY",
+      if (!config.selectedSite?.siteUrl) {
+        throw new ConnectorExecutionError("GSC site selection is missing", {
+          code: "MISSING_GSC_SITE",
           retryable: false
         });
       }
 
       if (!connection.credentialRef) {
-        throw new ConnectorExecutionError("GA4 credential reference is missing", {
+        throw new ConnectorExecutionError("GSC credential reference is missing", {
           code: "MISSING_CREDENTIAL",
           retryable: false
         });
@@ -254,7 +309,7 @@ export function createGa4Connector(input?: {
 
       const credential = await credentialStore.get(connection.credentialRef);
       if (!credential) {
-        throw new ConnectorExecutionError("Missing GA4 credential", {
+        throw new ConnectorExecutionError("Missing GSC credential", {
           code: "MISSING_CREDENTIAL",
           retryable: false
         });
@@ -276,21 +331,21 @@ export function createGa4Connector(input?: {
       }
 
       if (typeof accessToken !== "string" || accessToken.length === 0) {
-        throw new ConnectorExecutionError("Missing GA4 access token", {
+        throw new ConnectorExecutionError("Missing GSC access token", {
           code: "MISSING_ACCESS_TOKEN",
           retryable: false
         });
       }
 
       const dateWindow = readDateWindow(config, now);
-      const fetched = await provider.fetchDailyPageMetrics({
-        propertyId: config.selectedProperty.propertyId,
+      const fetched = await provider.fetchDailyQueryMetrics({
+        siteUrl: config.selectedSite.siteUrl,
         startDate: dateWindow.startDate,
         endDate: dateWindow.endDate,
         accessToken
       });
 
-      const ingestion = await pageMetricsStore.ingest({
+      const ingestion = await metricsStore.ingest({
         propertyId: connection.propertyId,
         rows: fetched.rows
       });
@@ -299,7 +354,12 @@ export function createGa4Connector(input?: {
         {
           segment: "daily-page-metrics",
           status: "success",
-          recordsSynced: ingestion.recordsSynced
+          recordsSynced: ingestion.pageRecordsSynced
+        },
+        {
+          segment: "daily-query-metrics",
+          status: "success",
+          recordsSynced: ingestion.queryRecordsSynced
         },
         ...fetched.failures.map((failure) => ({
           segment: failure.segment,
@@ -310,13 +370,13 @@ export function createGa4Connector(input?: {
         }))
       ];
 
-      if (ingestion.unresolvedPagePaths.length > 0) {
+      if (ingestion.unresolvedPageUrls.length > 0) {
         segments.push({
           segment: "page-resolution",
           status: "failed",
           retryable: false,
-          code: "UNRESOLVED_PAGE_PATHS",
-          message: `Unresolved page paths: ${ingestion.unresolvedPagePaths.join(", ")}`
+          code: "UNRESOLVED_PAGE_URLS",
+          message: `Unresolved page URLs: ${ingestion.unresolvedPageUrls.join(", ")}`
         });
       }
 

@@ -33,6 +33,9 @@ export interface ConnectorSyncResult {
   fetchedAt: Date;
   latestDataAt: Date | null;
   segments: ConnectorSyncSegmentResult[];
+  connectionUpdates?: {
+    configJson?: Record<string, unknown> | null;
+  };
 }
 
 export interface OAuthRefreshInput {

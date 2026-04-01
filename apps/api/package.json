@@ -19,6 +19,7 @@
     "@prisma/client": "^6.6.0",
     "@webops-wizard/config": "workspace:*",
     "@webops-wizard/db": "workspace:*",
+    "@webops-wizard/integrations": "workspace:*",
     "@webops-wizard/types": "workspace:*",
     "fastify": "^5.5.0",
     "reflect-metadata": "^0.2.2",
