@@ -56,6 +56,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function emitObserverEvent(
+  observer: RetryObserver | undefined,
+  event: RetryObserverEvent
+): void {
+  try {
+    observer?.onEvent(event);
+  } catch {
+    // Observability must not alter retry behavior.
+  }
+}
+
 export async function runWithRetry<T>(
   operation: () => Promise<T>,
   policy: RetryPolicy,
@@ -64,7 +75,7 @@ export async function runWithRetry<T>(
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
-    observer?.onEvent({
+    emitObserverEvent(observer, {
       type: "attempt_started",
       attempt
     });
@@ -75,7 +86,7 @@ export async function runWithRetry<T>(
       lastError = error;
       const retryable = isRetryableError(error);
 
-      observer?.onEvent({
+      emitObserverEvent(observer, {
         type: "attempt_failed",
         attempt,
         code: error instanceof ConnectorExecutionError ? error.code : undefined,
@@ -83,7 +94,7 @@ export async function runWithRetry<T>(
       });
 
       if (retryable && error.code === "RATE_LIMIT") {
-        observer?.onEvent({
+        emitObserverEvent(observer, {
           type: "rate_limited",
           attempt,
           code: error.code
@@ -95,7 +106,7 @@ export async function runWithRetry<T>(
       }
 
       const delayMs = policy.baseDelayMs * attempt;
-      observer?.onEvent({
+      emitObserverEvent(observer, {
         type: "retry_scheduled",
         attempt,
         delayMs

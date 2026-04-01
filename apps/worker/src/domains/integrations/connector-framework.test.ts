@@ -101,31 +101,95 @@ describe("retry runner", () => {
     ]);
   });
 
-  it("emits a rate_limited event for retryable rate limit failures", async () => {
-    const events: Array<Record<string, unknown>> = [];
+  it("ignores observer failures and keeps retry behavior intact", async () => {
+    let attempt = 0;
+    const observerCalls: Array<string> = [];
 
-    await expect(
-      runWithRetry(
-        async () => {
+    const result = await runWithRetry(
+      async () => {
+        attempt += 1;
+
+        if (attempt < 3) {
+          throw new ConnectorExecutionError("transient", {
+            code: "UPSTREAM_UNAVAILABLE",
+            retryable: true
+          });
+        }
+
+        return "ok";
+      },
+      createRetryPolicy({ maxAttempts: 3, baseDelayMs: 1 }),
+      {
+        onEvent(event) {
+          observerCalls.push(event.type);
+
+          if (event.type === "attempt_failed") {
+            throw new Error("observer failed");
+          }
+        }
+      }
+    );
+
+    expect(result).toBe("ok");
+    expect(attempt).toBe(3);
+    expect(observerCalls).toEqual([
+      "attempt_started",
+      "attempt_failed",
+      "retry_scheduled",
+      "attempt_started",
+      "attempt_failed",
+      "retry_scheduled",
+      "attempt_started"
+    ]);
+  });
+
+  it("emits a rate_limited event in a real retry path", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    let attempt = 0;
+
+    const result = await runWithRetry(
+      async () => {
+        attempt += 1;
+
+        if (attempt === 1) {
           throw new ConnectorExecutionError("slow down", {
             code: "RATE_LIMIT",
             retryable: true
           });
-        },
-        createRetryPolicy({ maxAttempts: 1, baseDelayMs: 1 }),
-        {
-          onEvent(event) {
-            events.push(event);
-          }
         }
-      )
-    ).rejects.toMatchObject({ code: "RATE_LIMIT" });
 
-    expect(events).toContainEqual({
-      type: "rate_limited",
-      attempt: 1,
-      code: "RATE_LIMIT"
-    });
+        return "ok";
+      },
+      createRetryPolicy({ maxAttempts: 2, baseDelayMs: 1 }),
+      {
+        onEvent(event) {
+          events.push(event);
+        }
+      }
+    );
+
+    expect(result).toBe("ok");
+    expect(attempt).toBe(2);
+    expect(events).toEqual([
+      { type: "attempt_started", attempt: 1 },
+      {
+        type: "attempt_failed",
+        attempt: 1,
+        code: "RATE_LIMIT",
+        retryable: true
+      },
+      {
+        type: "rate_limited",
+        attempt: 1,
+        code: "RATE_LIMIT"
+      },
+      {
+        type: "retry_scheduled",
+        attempt: 1,
+        delayMs: 1
+      },
+      { type: "attempt_started", attempt: 2 }
+    ]);
   });
 
   it("does not retry non-retryable failures", async () => {
