@@ -2,6 +2,7 @@ export interface LatestSyncRunLike {
   startedAt: Date;
   status: "running" | "success" | "partial_failed" | "failed" | "retriable_failed";
   partialFailure: boolean;
+  healthMetadataJson: unknown;
   freshnessMetadataJson: unknown;
   coverageMetadataJson: unknown;
 }
@@ -15,6 +16,7 @@ export interface LastSyncHealth {
     at: string;
     message: string;
   } | null;
+  health: Record<string, unknown> | null;
   freshness: Record<string, unknown> | null;
   coverage: Record<string, unknown> | null;
 }
@@ -49,6 +51,7 @@ export function buildLastSyncHealth(input: {
             message: input.lastErrorMessage
           }
         : null,
+    health: asRecord(input.latestRun.healthMetadataJson),
     freshness: asRecord(input.latestRun.freshnessMetadataJson),
     coverage: asRecord(input.latestRun.coverageMetadataJson)
   };
