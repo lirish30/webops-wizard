@@ -658,12 +658,20 @@ describe("sync runner", () => {
     });
 
     expect(result.status).toBe("failed");
+    expect(result.partialFailure).toBe(false);
+    expect(result.partialFailureCount).toBe(0);
     expect(result.health.status).toBe("failed");
+    expect(result.health.partialFailure).toBe(false);
+    expect(result.health.partialFailureCount).toBe(0);
 
     const latestRun = persistence.getLatestRun("ic_failed_result");
     expect(latestRun?.status).toBe("failed");
+    expect(latestRun?.partialFailure).toBe(false);
+    expect(latestRun?.partialFailureCount).toBe(0);
     expect(latestRun?.health.status).toBe("failed");
+    expect(latestRun?.health.partialFailureCount).toBe(0);
     expect(latestRun?.healthMetadataJson.status).toBe("failed");
+    expect(latestRun?.healthMetadataJson.partialFailureCount).toBe(0);
 
     expect(infoEntries.map((entry) => entry.event)).toEqual([
       "connector_sync_started",

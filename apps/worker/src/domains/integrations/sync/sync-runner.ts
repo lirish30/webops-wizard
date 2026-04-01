@@ -369,7 +369,7 @@ export async function runConnectorSync(
       expectedSegments: coverage.expectedSegments
     });
     const partialFailure = status === "partial_failed";
-    const partialFailureCount = issues.length;
+    const partialFailureCount = partialFailure ? issues.length : 0;
     const finishedAt = new Date();
     const durationMs = computeDurationMs(
       executionStartedAtMs,
