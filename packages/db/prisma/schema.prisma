@@ -1,0 +1,163 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String                @id @default(uuid())
+  email           String                @unique
+  passwordHash    String?
+  fullName        String
+  authProvider    AuthProvider          @default(local)
+  status          UserStatus            @default(active)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  memberships     WorkspaceMembership[]
+  ownedWorkspaces Workspace[]           @relation("WorkspaceOwner")
+}
+
+model Workspace {
+  id          String                @id @default(uuid())
+  name        String
+  slug        String                @unique
+  ownerUserId String
+  planTier    String                @default("starter")
+  region      String                @default("us")
+  status      WorkspaceStatus       @default(active)
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  owner       User                  @relation("WorkspaceOwner", fields: [ownerUserId], references: [id])
+  memberships WorkspaceMembership[]
+  properties  Property[]
+}
+
+model WorkspaceMembership {
+  id          String         @id @default(uuid())
+  workspaceId String
+  userId      String
+  role        MembershipRole
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id])
+  user        User           @relation(fields: [userId], references: [id])
+
+  @@unique([workspaceId, userId])
+}
+
+model Property {
+  id              String                  @id @default(uuid())
+  workspaceId     String
+  name            String
+  primaryDomain   String
+  environment     PropertyEnvironment     @default(production)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  workspace       Workspace               @relation(fields: [workspaceId], references: [id])
+  integrations    IntegrationConnection[]
+  recommendations Recommendation[]
+  alerts          Alert[]
+  releases        ReleaseAnnotation[]
+}
+
+model IntegrationConnection {
+  id            String              @id @default(uuid())
+  workspaceId   String
+  propertyId    String?
+  provider      IntegrationProvider
+  status        IntegrationStatus   @default(syncing)
+  lastSuccessAt DateTime?
+  configJson    Json?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  property      Property?           @relation(fields: [propertyId], references: [id])
+}
+
+model Recommendation {
+  id                 String   @id @default(uuid())
+  propertyId         String
+  title              String
+  category           String
+  status             String   @default("new")
+  impactScore        Decimal  @default(0)
+  confidenceScore    Decimal  @default(0)
+  sourceEvidenceJson Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  property           Property @relation(fields: [propertyId], references: [id])
+}
+
+model Alert {
+  id           String   @id @default(uuid())
+  propertyId   String
+  type         String
+  severity     String
+  status       String   @default("open")
+  title        String
+  body         String
+  evidenceJson Json?
+  triggeredAt  DateTime @default(now())
+  property     Property @relation(fields: [propertyId], references: [id])
+}
+
+model ReleaseAnnotation {
+  id          String   @id @default(uuid())
+  propertyId  String
+  eventType   String
+  title       String
+  description String?
+  startedAt   DateTime
+  createdAt   DateTime @default(now())
+  property    Property @relation(fields: [propertyId], references: [id])
+}
+
+enum AuthProvider {
+  local
+  google
+  microsoft
+}
+
+enum UserStatus {
+  active
+  invited
+  suspended
+}
+
+enum WorkspaceStatus {
+  active
+  suspended
+}
+
+enum MembershipRole {
+  owner
+  admin
+  manager
+  analyst
+  viewer
+  external_stakeholder
+  agency_manager
+  client_viewer
+}
+
+enum PropertyEnvironment {
+  sandbox
+  staging
+  production
+}
+
+enum IntegrationProvider {
+  ga4
+  gsc
+  sitemap
+  crawler
+}
+
+enum IntegrationStatus {
+  connected
+  warning
+  error
+  syncing
+}

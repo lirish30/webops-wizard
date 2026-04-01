@@ -1,0 +1,23 @@
+{
+  "name": "@webops-wizard/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./env": "./src/env.ts",
+    "./eslint": "./eslint/base.cjs",
+    "./prettier": "./prettier/base.cjs",
+    "./tsconfig/base": "./tsconfig/base.json",
+    "./vitest": "./vitest/base.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.24.2"
+  }
+}

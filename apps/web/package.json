@@ -1,0 +1,21 @@
+{
+  "name": "@webops-wizard/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "lint": "eslint src --ext .ts,.tsx",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@webops-wizard/types": "workspace:*",
+    "@webops-wizard/ui": "workspace:*",
+    "next": "^15.2.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.24.2"
+  }
+}

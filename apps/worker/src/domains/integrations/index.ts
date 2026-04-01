@@ -1,0 +1,1 @@
+export const integrationsWorkerDomain = "integrations";
