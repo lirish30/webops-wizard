@@ -31,6 +31,14 @@ If feature work continues on the current path, `apps/web` will accumulate ad hoc
   - connector health
   - recommendation severity
   - approval status
+- The product has one expressive visual system for:
+  - trust score
+  - confidence score
+  - freshness
+  - severity
+  - actionability
+  - blocked status
+  - approval state
 - The first version is broad enough to support current SaaS shell work, recommendation workflows, connector surfaces, trust reporting, and approval flows.
 
 ## Non-Goals
@@ -53,6 +61,356 @@ The UI library should preserve and formalize the design language already introdu
 - Clear semantic state colors with restrained saturation.
 
 This library should feel like enterprise operations software, not generic dashboard chrome.
+
+## Semantic Visual System
+
+The library should include an expressive but disciplined scoring language. The goal is not to make every status look the same. The goal is to make related concepts feel like part of one system while still encoding their meaning through form, color, and structure.
+
+### Semantic Classes
+
+The seven concepts are split into three visual classes.
+
+#### 1. Scored Gradients
+
+These concepts are measurable and should support numeric or banded display:
+
+- trust score
+- confidence score
+- freshness
+- actionability
+
+They should use richer score-oriented treatments such as:
+
+- ring meters
+- segmented bars
+- weighted score pills
+
+#### 2. Risk Intensity
+
+This concept represents urgency and should not read as a neutral score:
+
+- severity
+
+It should use sharper visual treatment such as:
+
+- high-contrast lozenges
+- edge-accent surfaces
+- stronger escalation contrast between low and critical
+
+#### 3. Workflow State
+
+These concepts represent operational gates and process state rather than measurement:
+
+- blocked status
+- approval state
+
+They should use state-oriented treatments such as:
+
+- stamped pills
+- checkpoint markers
+- step-aligned state markers
+
+This split is a core design rule. A trust score must not look like a blocked state. Approval must not look like a freshness band. Shared tokens unify the system, but each semantic class must retain its own structure.
+
+## Semantic Concepts
+
+### Trust Score
+
+Meaning:
+- how trustworthy the underlying signal or data source is
+
+Display model:
+- accepts numeric score from 0 to 100 or a banded value
+- defaults to ring, bar, or weighted pill display
+
+Visual treatment:
+- reliability-oriented treatment
+- cooler and steadier than severity
+- can use warmer caution tones as trust degrades
+
+### Confidence Score
+
+Meaning:
+- how confident the system is in a recommendation, finding, or conclusion
+
+Display model:
+- accepts numeric score from 0 to 100 or a banded value
+- defaults to ring, bar, or weighted pill display
+
+Visual treatment:
+- analytical and measured
+- more restrained than trust
+- should feel computed rather than risk-heavy
+
+### Freshness
+
+Meaning:
+- how current a signal, dataset, page reading, or system output is
+
+Display model:
+- accepts either age-derived buckets or explicit freshness bands
+- defaults to compact pill or segmented freshness bar
+
+Visual treatment:
+- freshness should visually decay over time
+- not only color, but density or fill should communicate staleness
+
+### Severity
+
+Meaning:
+- how urgent or harmful a recommendation, alert, or issue is
+
+Display model:
+- categorical only
+
+Visual treatment:
+- sharper, more compressed emphasis than score components
+- must feel urgent and directional
+
+### Actionability
+
+Meaning:
+- how ready something is for immediate user action
+
+Display model:
+- accepts numeric score or explicit band
+- defaults to pill or segmented bar
+
+Visual treatment:
+- forward-leaning and task-oriented
+- should feel like readiness, not reliability
+
+### Blocked Status
+
+Meaning:
+- whether work or workflow progression is currently blocked
+
+Display model:
+- binary with optional reason text
+
+Visual treatment:
+- hard-stop visual language
+- must read as gating state immediately
+
+### Approval State
+
+Meaning:
+- where an item sits in the review and approval lifecycle
+
+Display model:
+- categorical workflow state
+
+Visual treatment:
+- process-oriented rather than score-oriented
+- should pair naturally with timeline and stepper patterns
+
+## Semantic Token Model
+
+The semantic layer should be implemented through reusable tokens and recipe maps in `packages/ui`.
+
+### Shared Token Fields
+
+Each semantic recipe should define:
+
+- foreground color
+- background color
+- border color
+- accent color
+- icon or dot treatment
+- ring or bar fill treatment
+- emphasis level
+
+### Band Sets
+
+The first version should standardize the following band sets.
+
+#### Score Bands
+
+Used by trust score and confidence score:
+
+- `excellent`
+- `strong`
+- `moderate`
+- `weak`
+- `critical`
+
+#### Freshness Bands
+
+Used by freshness:
+
+- `live`
+- `recent`
+- `aging`
+- `stale`
+
+#### Severity Bands
+
+Used by severity:
+
+- `info`
+- `low`
+- `medium`
+- `high`
+- `critical`
+
+#### Actionability Bands
+
+Used by actionability:
+
+- `ready`
+- `qualified`
+- `partial`
+- `blocked`
+
+#### Approval States
+
+Used by approval state:
+
+- `draft`
+- `in_review`
+- `approved`
+- `rejected`
+- `blocked`
+
+#### Blocked States
+
+Used by blocked status:
+
+- `clear`
+- `blocked`
+
+## Mapping Rules
+
+The system should be deterministic. Product teams should not choose arbitrary colors or reinterpret meanings in feature code.
+
+### Trust Score Mapping
+
+- accepts numeric scores from 0 to 100
+- maps to the shared five-band score scale
+- may use slightly warmer caution tones than confidence
+
+### Confidence Score Mapping
+
+- accepts numeric scores from 0 to 100
+- maps to the shared five-band score scale
+- remains more neutral than trust at the same band
+
+### Freshness Mapping
+
+- accepts explicit band or derived age bucket
+- should degrade through visual fill and color, not color alone
+
+### Severity Mapping
+
+- categorical only
+- UI code should not infer severity styling from raw numeric score fragments
+
+### Actionability Mapping
+
+- accepts score or explicit band
+- should always answer whether an operator can act now
+
+### Blocked Mapping
+
+- binary state with optional reason text
+
+### Approval Mapping
+
+- categorical workflow state only
+
+## Component Model For Semantic Concepts
+
+The semantic system should expose shared indicator primitives plus domain-specific wrappers.
+
+### Shared Indicator Components
+
+- `ScoreIndicator`
+- `SeverityIndicator`
+- `StatePill`
+
+### ScoreIndicator
+
+Used for:
+
+- trust score
+- confidence score
+- freshness
+- actionability
+
+Supported modes:
+
+- `pill`
+- `bar`
+- `ring`
+- `compact`
+
+### SeverityIndicator
+
+Used for:
+
+- severity
+
+Supported modes:
+
+- `pill`
+- `badge`
+- `compact`
+
+### StatePill
+
+Used for:
+
+- blocked status
+- approval state
+
+Supported modes:
+
+- `pill`
+- `stamped`
+- `compact`
+
+### Domain Wrappers
+
+These components should wrap the shared indicators and constrain allowed values:
+
+- `TrustScore`
+- `ConfidenceScore`
+- `FreshnessIndicator`
+- `ActionabilityIndicator`
+- `SeverityBadge`
+- `BlockedState`
+- `ApprovalState`
+
+The wrappers should encode labels and allowed values, but styling must still flow through the shared semantic recipe layer.
+
+## Layout And Usage Rules
+
+To keep the system consistent, display modes should follow environment rules.
+
+### Tables
+
+- default to compact indicators
+- prioritize scan speed over decoration
+
+### Cards
+
+- default to pill or ring indicators
+- allow score plus supporting context
+
+### Detail Panels And Drawers
+
+- allow ring or bar indicators
+- pair with explanation text and reason states
+
+### Timelines And Steppers
+
+- use workflow-state treatments for approval and blocked concepts
+- do not render approval as a score
+
+### Shell And List Status
+
+- use `StatePill` or compact score indicators
+- do not introduce app-local status styling
 
 ## Architecture
 
@@ -99,14 +457,21 @@ These components should have consistent styling and accessibility behavior, but 
 Higher-level components built on the primitives:
 
 - `TrustBadge`
+- `TrustScore`
+- `ConfidenceScore`
+- `FreshnessIndicator`
 - `ConnectorStatusBadge`
 - `SeverityBadge`
 - `ApprovalBadge`
+- `ActionabilityIndicator`
+- `BlockedState`
 - `KpiCard`
 - `TimelineItem`
 - `ScoreIndicator`
 
 These components encode product semantics and should be preferred over free-form primitive combinations when the domain meaning is already known.
+
+`TrustBadge` remains available for categorical trust posture where a binary or banded badge is enough. `TrustScore` is the expressive scored variant for numeric trust displays.
 
 ### 4. Runtime Helpers
 
@@ -140,6 +505,8 @@ packages/ui/src/
     card.tsx
     badge.tsx
     status-pill.tsx
+    severity-indicator.tsx
+    state-pill.tsx
     tabs.tsx
     drawer.tsx
     modal.tsx
@@ -150,9 +517,14 @@ packages/ui/src/
     table.tsx
     filter-bar.tsx
     trust-badge.tsx
+    trust-score.tsx
+    confidence-score.tsx
+    freshness-indicator.tsx
     connector-status-badge.tsx
     severity-badge.tsx
     approval-badge.tsx
+    actionability-indicator.tsx
+    blocked-state.tsx
     kpi-card.tsx
     timeline-item.tsx
     score-indicator.tsx
@@ -322,7 +694,7 @@ Allowed values:
 - `drift`
 
 Purpose:
-- represent data confidence and trust posture
+- represent categorical trust posture when a full numeric score is not required
 
 ### ConnectorStatusBadge
 
@@ -484,9 +856,14 @@ Build interactive primitives:
 Build product patterns:
 
 - `TrustBadge`
+- `TrustScore`
+- `ConfidenceScore`
+- `FreshnessIndicator`
 - `ConnectorStatusBadge`
 - `SeverityBadge`
 - `ApprovalBadge`
+- `ActionabilityIndicator`
+- `BlockedState`
 - `KpiCard`
 - `TimelineItem`
 - `ScoreIndicator`
