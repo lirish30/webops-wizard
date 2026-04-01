@@ -1,12 +1,42 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@webops-wizard/db";
 
+import { buildLastSyncHealth } from "./integrations.health";
+
 @Injectable()
 export class IntegrationsService {
   async listIntegrations(workspaceId: string) {
-    return prisma.integrationConnection.findMany({
+    const rows = await prisma.integrationConnection.findMany({
       where: { workspaceId },
+      include: {
+        syncRuns: {
+          take: 1,
+          orderBy: [{ startedAt: "desc" }]
+        }
+      },
       orderBy: [{ updatedAt: "desc" }]
+    });
+
+    return rows.map((row) => {
+      const { syncRuns, ...connection } = row;
+
+      return {
+        ...connection,
+        lastSyncHealth: buildLastSyncHealth({
+          lastSuccessAt: row.lastSuccessAt,
+          lastErrorAt: row.lastErrorAt,
+          lastErrorMessage: row.lastErrorMessage,
+          latestRun: syncRuns[0]
+            ? {
+                startedAt: syncRuns[0].startedAt,
+                status: syncRuns[0].status,
+                partialFailure: syncRuns[0].partialFailure,
+                freshnessMetadataJson: syncRuns[0].freshnessMetadataJson,
+                coverageMetadataJson: syncRuns[0].coverageMetadataJson
+              }
+            : null
+        })
+      };
     });
   }
 

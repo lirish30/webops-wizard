@@ -11,6 +11,7 @@ import { AlertsModule } from "./domains/alerts/alerts.module";
 import { AuditLogModule } from "./domains/audit-log/audit-log.module";
 import { AuthModule } from "./domains/auth/auth.module";
 import { DataTrustModule } from "./domains/data-trust/data-trust.module";
+import { BackgroundJobsModule } from "./domains/background-jobs/background-jobs.module";
 import { IntegrationsModule } from "./domains/integrations/integrations.module";
 import { PageIntelligenceModule } from "./domains/page-intelligence/page-intelligence.module";
 import { PropertiesModule } from "./domains/properties/properties.module";
@@ -26,6 +27,7 @@ import { WorkspacesModule } from "./domains/workspaces/workspaces.module";
     AuthModule,
     WorkspacesModule,
     PropertiesModule,
+    BackgroundJobsModule,
     IntegrationsModule,
     PageIntelligenceModule,
     DataTrustModule,

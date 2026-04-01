@@ -54,6 +54,8 @@ model Workspace {
   invites      WorkspaceInvite[]
   properties   Property[]
   integrations IntegrationConnection[]
+  connectorCredentials ConnectorCredential[]
+  connectorSyncRuns    ConnectorSyncRun[]
   auditEvents  AuditLogEvent[]
 
   @@index([ownerUserId])
@@ -186,6 +188,7 @@ model Property {
   workspace               Workspace               @relation(fields: [workspaceId], references: [id])
   settings                PropertySetting[]
   integrations            IntegrationConnection[]
+  connectorSyncRuns       ConnectorSyncRun[]
   dataSourceHealthRows    DataSourceHealth[]
   comparabilityWindows    ComparabilityWindow[]
   measurementAnnotations  MeasurementAnnotation[]
@@ -248,6 +251,7 @@ model IntegrationConnection {
   property           Property?           @relation(fields: [propertyId], references: [id], onDelete: SetNull)
   createdByUser      User?               @relation("IntegrationCreatedBy", fields: [createdByUserId], references: [id])
   healthChecks       DataSourceHealth[]
+  syncRuns           ConnectorSyncRun[]
 
   @@unique([workspaceId, propertyId, provider])
   @@index([workspaceId])
@@ -255,6 +259,62 @@ model IntegrationConnection {
   @@index([status])
   @@index([propertyId, provider])
   @@map("integration_connections")
+}
+
+model ConnectorCredential {
+  id          String              @id @default(uuid())
+  reference   String              @unique
+  workspaceId String              @map("workspace_id")
+  provider    IntegrationProvider
+  payloadJson Json                @map("payload_json")
+  metadataJson Json?              @map("metadata_json")
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, provider])
+  @@map("connector_credentials")
+}
+
+model ConnectorSyncRun {
+  id                      String                   @id @default(uuid())
+  integrationConnectionId String                   @map("integration_connection_id")
+  workspaceId             String                   @map("workspace_id")
+  propertyId              String?                  @map("property_id")
+  provider                IntegrationProvider
+  trigger                 ConnectorSyncRunTrigger
+  status                  ConnectorSyncRunStatus
+  partialFailure          Boolean                  @default(false) @map("partial_failure")
+  startedAt               DateTime                 @map("started_at") @db.Timestamptz(6)
+  finishedAt              DateTime?                @map("finished_at") @db.Timestamptz(6)
+  freshnessMetadataJson   Json?                    @map("freshness_metadata_json")
+  coverageMetadataJson    Json?                    @map("coverage_metadata_json")
+  healthMetadataJson      Json?                    @map("health_metadata_json")
+  errorMessage            String?                  @map("error_message")
+  integrationConnection   IntegrationConnection    @relation(fields: [integrationConnectionId], references: [id], onDelete: Cascade)
+  workspace               Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  property                Property?                @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  issues                  ConnectorSyncRunIssue[]
+
+  @@index([integrationConnectionId, startedAt])
+  @@index([workspaceId, startedAt])
+  @@index([propertyId, startedAt])
+  @@map("connector_sync_runs")
+}
+
+model ConnectorSyncRunIssue {
+  id           String           @id @default(uuid())
+  runId        String           @map("run_id")
+  segment      String
+  code         String
+  message      String
+  retryable    Boolean          @default(false)
+  metadataJson Json?            @map("metadata_json")
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  run          ConnectorSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, segment])
+  @@map("connector_sync_run_issues")
 }
 
 model DataSourceHealth {
@@ -804,6 +864,21 @@ enum IntegrationStatus {
   error
   syncing
   disconnected
+}
+
+enum ConnectorSyncRunStatus {
+  running
+  success
+  partial_failed
+  failed
+  retriable_failed
+}
+
+enum ConnectorSyncRunTrigger {
+  schedule
+  manual
+  retry
+  webhook
 }
 
 enum DataSourceHealthStatus {

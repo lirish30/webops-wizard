@@ -11,7 +11,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@prisma/client": "^6.6.0",
     "@webops-wizard/config": "workspace:*",
+    "@webops-wizard/db": "workspace:*",
     "@webops-wizard/types": "workspace:*",
     "bullmq": "^5.46.1",
     "ioredis": "^5.4.2",

@@ -1,22 +1,18 @@
-import type { QueueContract } from "@webops-wizard/types";
+import {
+  workflowQueueNames,
+  type QueueContract,
+  type WorkflowPayloadByQueue,
+  type WorkflowQueueName
+} from "@webops-wizard/types";
 
-export const queueNames = [
-  "connector-sync",
-  "crawl",
-  "page-intelligence",
-  "trust-scoring",
-  "recommendation-generation",
-  "report-generation",
-  "alert-evaluation",
-  "cache-refresh"
-] as const;
+export const queueNames = workflowQueueNames;
 
-export type QueueName = (typeof queueNames)[number];
+export type QueueName = WorkflowQueueName;
 
-export function createQueueContract<TPayload>(
-  name: QueueName,
-  payload: TPayload
-): QueueContract<TPayload> {
+export function createQueueContract<TQueue extends QueueName>(
+  name: TQueue,
+  payload: WorkflowPayloadByQueue[TQueue]
+): QueueContract<WorkflowPayloadByQueue[TQueue]> {
   return {
     name,
     payload,

@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Req,
   UseGuards
 } from "@nestjs/common";
@@ -15,6 +16,7 @@ import {
   ApiTags
 } from "@nestjs/swagger";
 import type { FastifyRequest } from "fastify";
+import { z } from "zod";
 
 import { AuditService } from "../../common/audit/audit.service";
 import {
@@ -29,8 +31,14 @@ import {
   WorkspaceAccessGuard,
   type WorkspaceAccess
 } from "../../common/security/workspace-auth";
+import { BackgroundJobsService } from "../background-jobs/background-jobs.service";
 import { updateIntegrationSchema } from "./integrations.dto";
 import { IntegrationsService } from "./integrations.service";
+
+const syncNowSchema = z.object({
+  propertyId: z.string().uuid().optional(),
+  idempotencyKey: z.string().min(1).max(256).optional()
+});
 
 @Controller("integrations")
 @UseGuards(SessionAuthGuard, WorkspaceAccessGuard)
@@ -39,7 +47,8 @@ import { IntegrationsService } from "./integrations.service";
 export class IntegrationsController {
   constructor(
     private readonly integrationsService: IntegrationsService,
-    private readonly auditService: AuditService
+    private readonly auditService: AuditService,
+    private readonly backgroundJobsService: BackgroundJobsService
   ) {}
 
   @Get()
@@ -117,6 +126,51 @@ export class IntegrationsController {
     return {
       workspaceId: workspace.workspaceId,
       integration: updated
+    };
+  }
+
+  @Post(":integrationId/sync-now")
+  @RequireWorkspaceCapabilities("integration.manage")
+  @ApiOperation({ summary: "Enqueue connector sync job for integration" })
+  async syncNow(
+    @Param("integrationId") integrationId: string,
+    @Body() body: unknown,
+    @CurrentWorkspace() workspace: WorkspaceAccess,
+    @Req() request: FastifyRequest
+  ) {
+    const input = parseWithSchema(syncNowSchema, body);
+    const enqueued = await this.backgroundJobsService.enqueueForWorkspace({
+      workspaceId: workspace.workspaceId,
+      userId: workspace.userId,
+      body: {
+        workflow: "connector-sync",
+        integrationConnectionId: integrationId,
+        propertyId: input.propertyId,
+        trigger: "manual",
+        ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {})
+      }
+    });
+
+    await this.auditService.record(
+      {
+        workspaceId: workspace.workspaceId,
+        actorUserId: workspace.userId,
+        category: "integration",
+        eventType: "integration.sync_requested",
+        targetType: "integration_connection",
+        targetId: integrationId,
+        metadataJson: {
+          deduplicated: enqueued.deduplicated,
+          workflowJobId: enqueued.job.id
+        }
+      },
+      request
+    );
+
+    return {
+      workspaceId: workspace.workspaceId,
+      integrationId,
+      ...enqueued
     };
   }
 }
