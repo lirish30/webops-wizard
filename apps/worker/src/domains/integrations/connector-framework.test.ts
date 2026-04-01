@@ -46,6 +46,88 @@ describe("retry runner", () => {
     expect(attempt).toBe(3);
   });
 
+  it("emits observer events for retryable failures", async () => {
+    let attempt = 0;
+    const events: Array<Record<string, unknown>> = [];
+
+    const result = await runWithRetry(
+      async () => {
+        attempt += 1;
+
+        if (attempt < 3) {
+          throw new ConnectorExecutionError("transient", {
+            code: "UPSTREAM_UNAVAILABLE",
+            retryable: true
+          });
+        }
+
+        return "ok";
+      },
+      createRetryPolicy({ maxAttempts: 3, baseDelayMs: 1 }),
+      {
+        onEvent(event) {
+          events.push(event);
+        }
+      }
+    );
+
+    expect(result).toBe("ok");
+    expect(events).toEqual([
+      { type: "attempt_started", attempt: 1 },
+      {
+        type: "attempt_failed",
+        attempt: 1,
+        code: "UPSTREAM_UNAVAILABLE",
+        retryable: true
+      },
+      {
+        type: "retry_scheduled",
+        attempt: 1,
+        delayMs: 1
+      },
+      { type: "attempt_started", attempt: 2 },
+      {
+        type: "attempt_failed",
+        attempt: 2,
+        code: "UPSTREAM_UNAVAILABLE",
+        retryable: true
+      },
+      {
+        type: "retry_scheduled",
+        attempt: 2,
+        delayMs: 2
+      },
+      { type: "attempt_started", attempt: 3 }
+    ]);
+  });
+
+  it("emits a rate_limited event for retryable rate limit failures", async () => {
+    const events: Array<Record<string, unknown>> = [];
+
+    await expect(
+      runWithRetry(
+        async () => {
+          throw new ConnectorExecutionError("slow down", {
+            code: "RATE_LIMIT",
+            retryable: true
+          });
+        },
+        createRetryPolicy({ maxAttempts: 1, baseDelayMs: 1 }),
+        {
+          onEvent(event) {
+            events.push(event);
+          }
+        }
+      )
+    ).rejects.toMatchObject({ code: "RATE_LIMIT" });
+
+    expect(events).toContainEqual({
+      type: "rate_limited",
+      attempt: 1,
+      code: "RATE_LIMIT"
+    });
+  });
+
   it("does not retry non-retryable failures", async () => {
     let attempt = 0;
 

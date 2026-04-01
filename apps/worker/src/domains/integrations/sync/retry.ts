@@ -3,6 +3,32 @@ export interface RetryPolicy {
   baseDelayMs: number;
 }
 
+export type RetryObserverEvent =
+  | {
+      type: "attempt_started";
+      attempt: number;
+    }
+  | {
+      type: "attempt_failed";
+      attempt: number;
+      code?: string;
+      retryable: boolean;
+    }
+  | {
+      type: "retry_scheduled";
+      attempt: number;
+      delayMs: number;
+    }
+  | {
+      type: "rate_limited";
+      attempt: number;
+      code: string;
+    };
+
+export interface RetryObserver {
+  onEvent(event: RetryObserverEvent): void;
+}
+
 export class ConnectorExecutionError extends Error {
   readonly code: string;
   readonly retryable: boolean;
@@ -32,21 +58,50 @@ function sleep(ms: number): Promise<void> {
 
 export async function runWithRetry<T>(
   operation: () => Promise<T>,
-  policy: RetryPolicy
+  policy: RetryPolicy,
+  observer?: RetryObserver
 ): Promise<T> {
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
+    observer?.onEvent({
+      type: "attempt_started",
+      attempt
+    });
+
     try {
       return await operation();
     } catch (error) {
       lastError = error;
+      const retryable = isRetryableError(error);
 
-      if (!isRetryableError(error) || attempt >= policy.maxAttempts) {
+      observer?.onEvent({
+        type: "attempt_failed",
+        attempt,
+        code: error instanceof ConnectorExecutionError ? error.code : undefined,
+        retryable
+      });
+
+      if (retryable && error.code === "RATE_LIMIT") {
+        observer?.onEvent({
+          type: "rate_limited",
+          attempt,
+          code: error.code
+        });
+      }
+
+      if (!retryable || attempt >= policy.maxAttempts) {
         throw error;
       }
 
-      await sleep(policy.baseDelayMs * attempt);
+      const delayMs = policy.baseDelayMs * attempt;
+      observer?.onEvent({
+        type: "retry_scheduled",
+        attempt,
+        delayMs
+      });
+
+      await sleep(delayMs);
     }
   }
 
