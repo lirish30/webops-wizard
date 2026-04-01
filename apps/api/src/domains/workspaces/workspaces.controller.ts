@@ -1,18 +1,19 @@
+import { Body, Controller, Delete, Get, Param, Patch, Req, UseGuards } from "@nestjs/common";
 import {
-  BadRequestException,
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Req,
-  UseGuards
-} from "@nestjs/common";
+  ApiBody,
+  ApiCookieAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags
+} from "@nestjs/swagger";
 import type { FastifyRequest } from "fastify";
-import { ZodError } from "zod";
 
 import { AuditService } from "../../common/audit/audit.service";
+import {
+  buildSuccessEnvelopeSchema,
+  COOKIE_AUTH_SCHEME
+} from "../../common/api/openapi-schemas";
+import { parseWithSchema } from "../../common/api/validation";
 import {
   CurrentActor,
   CurrentWorkspace,
@@ -22,12 +23,13 @@ import {
   type WorkspaceAccess
 } from "../../common/security/workspace-auth";
 import {
-  updateMembershipRoleSchema,
-  type UpdateMembershipRoleInput
+  updateMembershipRoleSchema
 } from "./workspaces.schemas";
 import { WorkspacesService } from "./workspaces.service";
 
 @Controller("workspaces")
+@ApiTags("workspaces")
+@ApiCookieAuth(COOKIE_AUTH_SCHEME)
 export class WorkspacesController {
   constructor(
     private readonly workspacesService: WorkspacesService,
@@ -36,6 +38,13 @@ export class WorkspacesController {
 
   @Get("switcher")
   @UseGuards(SessionAuthGuard)
+  @ApiOperation({ summary: "List workspaces for workspace switcher" })
+  @ApiOkResponse({
+    schema: buildSuccessEnvelopeSchema({
+      type: "object",
+      additionalProperties: true
+    })
+  })
   async getSwitcher(
     @CurrentActor() actor: { userId: string; activeWorkspaceId: string | null }
   ) {
@@ -45,6 +54,7 @@ export class WorkspacesController {
   @Get(":workspaceId")
   @UseGuards(SessionAuthGuard, WorkspaceAccessGuard)
   @RequireWorkspaceCapabilities("workspace.read")
+  @ApiOperation({ summary: "Get workspace details" })
   async getWorkspace(@CurrentWorkspace() workspace: WorkspaceAccess) {
     return this.workspacesService.getWorkspace(workspace.workspaceId);
   }
@@ -52,6 +62,7 @@ export class WorkspacesController {
   @Get(":workspaceId/memberships")
   @UseGuards(SessionAuthGuard, WorkspaceAccessGuard)
   @RequireWorkspaceCapabilities("workspace.memberships.read")
+  @ApiOperation({ summary: "List workspace memberships" })
   async listMemberships(@CurrentWorkspace() workspace: WorkspaceAccess) {
     return {
       workspaceId: workspace.workspaceId,
@@ -62,6 +73,16 @@ export class WorkspacesController {
   @Patch(":workspaceId/memberships/:membershipId")
   @UseGuards(SessionAuthGuard, WorkspaceAccessGuard)
   @RequireWorkspaceCapabilities("workspace.memberships.manage")
+  @ApiOperation({ summary: "Update membership role" })
+  @ApiBody({
+    schema: {
+      type: "object",
+      properties: {
+        role: { type: "string", example: "manager" }
+      },
+      required: ["role"]
+    }
+  })
   async patchMembershipRole(
     @Param("membershipId") membershipId: string,
     @Body() body: unknown,
@@ -69,7 +90,7 @@ export class WorkspacesController {
     @CurrentActor() actor: { userId: string },
     @Req() request: FastifyRequest
   ) {
-    const input = this.parseBody(body);
+    const input = parseWithSchema(updateMembershipRoleSchema, body);
     const result = await this.workspacesService.updateMembershipRole({
       workspaceId: workspace.workspaceId,
       membershipId,
@@ -104,6 +125,7 @@ export class WorkspacesController {
   @Delete(":workspaceId/memberships/:membershipId")
   @UseGuards(SessionAuthGuard, WorkspaceAccessGuard)
   @RequireWorkspaceCapabilities("workspace.memberships.manage")
+  @ApiOperation({ summary: "Remove membership from workspace" })
   async removeMembership(
     @Param("membershipId") membershipId: string,
     @CurrentWorkspace() workspace: WorkspaceAccess,
@@ -137,16 +159,5 @@ export class WorkspacesController {
       membershipId: removedMembership.id,
       removed: true
     };
-  }
-
-  private parseBody(input: unknown): UpdateMembershipRoleInput {
-    try {
-      return updateMembershipRoleSchema.parse(input);
-    } catch (error) {
-      if (error instanceof ZodError) {
-        throw new BadRequestException(error.issues[0]?.message ?? "Invalid request.");
-      }
-      throw error;
-    }
   }
 }

@@ -1,8 +1,20 @@
 import { Body, Controller, Get, Patch, Req, UseGuards } from "@nestjs/common";
+import {
+  ApiBody,
+  ApiCookieAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags
+} from "@nestjs/swagger";
 import { prisma } from "@webops-wizard/db";
+import type { WorkspacePlanTier } from "@prisma/client";
 import type { FastifyRequest } from "fastify";
 
 import { AuditService } from "../../common/audit/audit.service";
+import {
+  buildSuccessEnvelopeSchema,
+  COOKIE_AUTH_SCHEME
+} from "../../common/api/openapi-schemas";
 import {
   CurrentWorkspace,
   RequireWorkspaceCapabilities,
@@ -13,11 +25,23 @@ import {
 
 @Controller("settings")
 @UseGuards(SessionAuthGuard, WorkspaceAccessGuard)
+@ApiTags("settings")
+@ApiCookieAuth(COOKIE_AUTH_SCHEME)
 export class SettingsController {
   constructor(private readonly auditService: AuditService) {}
 
   @Get()
   @RequireWorkspaceCapabilities("settings.read")
+  @ApiOperation({ summary: "Get workspace settings" })
+  @ApiOkResponse({
+    schema: buildSuccessEnvelopeSchema({
+      type: "object",
+      properties: {
+        workspaceId: { type: "string", format: "uuid" },
+        settings: { type: "object", additionalProperties: true }
+      }
+    })
+  })
   async getSettings(@CurrentWorkspace() workspace: WorkspaceAccess) {
     const workspaceSettings = await prisma.workspace.findUnique({
       where: { id: workspace.workspaceId },
@@ -40,8 +64,19 @@ export class SettingsController {
 
   @Patch("workspace")
   @RequireWorkspaceCapabilities("settings.manage")
+  @ApiOperation({ summary: "Update workspace settings" })
+  @ApiBody({
+    schema: {
+      type: "object",
+      properties: {
+        planTier: { type: "string", example: "pro" },
+        region: { type: "string", example: "us-west-2" },
+        status: { type: "string", enum: ["active", "suspended"], example: "active" }
+      }
+    }
+  })
   async updateWorkspaceSettings(
-    @Body() body: { planTier?: string; region?: string; status?: "active" | "suspended" },
+    @Body() body: { planTier?: WorkspacePlanTier; region?: string; status?: "active" | "suspended" },
     @CurrentWorkspace() workspace: WorkspaceAccess,
     @Req() request: FastifyRequest
   ) {

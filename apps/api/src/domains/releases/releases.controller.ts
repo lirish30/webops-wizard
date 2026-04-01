@@ -1,6 +1,7 @@
 import { Controller, Get, UseGuards } from "@nestjs/common";
-import { prisma } from "@webops-wizard/db";
+import { ApiCookieAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 
+import { COOKIE_AUTH_SCHEME } from "../../common/api/openapi-schemas";
 import {
   CurrentWorkspace,
   RequireWorkspaceCapabilities,
@@ -8,21 +9,20 @@ import {
   WorkspaceAccessGuard,
   type WorkspaceAccess
 } from "../../common/security/workspace-auth";
+import { ReleasesService } from "./releases.service";
 
 @Controller("releases")
 @UseGuards(SessionAuthGuard, WorkspaceAccessGuard)
+@ApiTags("releases")
+@ApiCookieAuth(COOKIE_AUTH_SCHEME)
 export class ReleasesController {
+  constructor(private readonly releasesService: ReleasesService) {}
+
   @Get()
   @RequireWorkspaceCapabilities("releases.read")
+  @ApiOperation({ summary: "List release annotations for workspace" })
   async listReleases(@CurrentWorkspace() workspace: WorkspaceAccess) {
-    const items = await prisma.releaseAnnotation.findMany({
-      where: {
-        property: {
-          workspaceId: workspace.workspaceId
-        }
-      },
-      orderBy: [{ startedAt: "desc" }]
-    });
+    const items = await this.releasesService.listReleases(workspace.workspaceId);
 
     return {
       workspaceId: workspace.workspaceId,
@@ -30,4 +30,3 @@ export class ReleasesController {
     };
   }
 }
-

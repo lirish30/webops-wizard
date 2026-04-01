@@ -5,6 +5,8 @@ export type RequestAuditContext = {
   requestId: string | null;
   ipAddress: string | null;
   userAgent: string | null;
+  workspaceIdHint: string | null;
+  hasSessionCookie: boolean;
 };
 
 export type AuditContextRequest = FastifyRequest & {
@@ -22,4 +24,3 @@ export type AuditEventInput = {
   metadataJson?: Record<string, unknown> | null;
   occurredAt?: Date;
 };
-

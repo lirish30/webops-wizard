@@ -2,16 +2,26 @@ import {
   Body,
   Controller,
   Get,
-  NotFoundException,
   Param,
   Patch,
   Req,
   UseGuards
 } from "@nestjs/common";
-import { prisma } from "@webops-wizard/db";
+import {
+  ApiBody,
+  ApiCookieAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags
+} from "@nestjs/swagger";
 import type { FastifyRequest } from "fastify";
 
 import { AuditService } from "../../common/audit/audit.service";
+import {
+  buildSuccessEnvelopeSchema,
+  COOKIE_AUTH_SCHEME
+} from "../../common/api/openapi-schemas";
+import { parseWithSchema } from "../../common/api/validation";
 import {
   CurrentWorkspace,
   RequireWorkspaceCapabilities,
@@ -19,19 +29,33 @@ import {
   WorkspaceAccessGuard,
   type WorkspaceAccess
 } from "../../common/security/workspace-auth";
+import { updateIntegrationSchema } from "./integrations.dto";
+import { IntegrationsService } from "./integrations.service";
 
 @Controller("integrations")
 @UseGuards(SessionAuthGuard, WorkspaceAccessGuard)
+@ApiTags("integrations")
+@ApiCookieAuth(COOKIE_AUTH_SCHEME)
 export class IntegrationsController {
-  constructor(private readonly auditService: AuditService) {}
+  constructor(
+    private readonly integrationsService: IntegrationsService,
+    private readonly auditService: AuditService
+  ) {}
 
   @Get()
   @RequireWorkspaceCapabilities("integration.read")
+  @ApiOperation({ summary: "List integrations in the current workspace" })
+  @ApiOkResponse({
+    schema: buildSuccessEnvelopeSchema({
+      type: "object",
+      properties: {
+        workspaceId: { type: "string", format: "uuid" },
+        items: { type: "array", items: { type: "object", additionalProperties: true } }
+      }
+    })
+  })
   async listIntegrations(@CurrentWorkspace() workspace: WorkspaceAccess) {
-    const integrations = await prisma.integrationConnection.findMany({
-      where: { workspaceId: workspace.workspaceId },
-      orderBy: [{ updatedAt: "desc" }]
-    });
+    const integrations = await this.integrationsService.listIntegrations(workspace.workspaceId);
 
     return {
       workspaceId: workspace.workspaceId,
@@ -41,33 +65,38 @@ export class IntegrationsController {
 
   @Patch(":integrationId")
   @RequireWorkspaceCapabilities("integration.manage")
+  @ApiOperation({ summary: "Update integration status/configuration" })
+  @ApiBody({
+    schema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["connected", "warning", "error", "syncing"],
+          example: "connected"
+        },
+        configJson: {
+          type: "object",
+          additionalProperties: true,
+          example: { syncWindowDays: 30 }
+        }
+      }
+    }
+  })
   async updateIntegration(
     @Param("integrationId") integrationId: string,
-    @Body() body: { status?: "connected" | "warning" | "error" | "syncing"; configJson?: unknown },
+    @Body() body: unknown,
     @CurrentWorkspace() workspace: WorkspaceAccess,
     @Req() request: FastifyRequest
   ) {
-    const data: Parameters<typeof prisma.integrationConnection.updateMany>[0]["data"] = {
-      ...(body.status ? { status: body.status } : {}),
-      ...(body.configJson !== undefined
-        ? { configJson: body.configJson as never }
-        : {})
-    };
-
-    const updateResult = await prisma.integrationConnection.updateMany({
-      where: {
-        id: integrationId,
-        workspaceId: workspace.workspaceId
-      },
-      data
-    });
-
-    if (updateResult.count === 0) {
-      throw new NotFoundException("Integration not found in workspace.");
-    }
-
-    const updated = await prisma.integrationConnection.findUnique({
-      where: { id: integrationId }
+    const input = parseWithSchema(updateIntegrationSchema, body);
+    const updated = await this.integrationsService.updateIntegration({
+      integrationId,
+      workspaceId: workspace.workspaceId,
+      body: {
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.configJson !== undefined ? { configJson: input.configJson } : {})
+      }
     });
 
     await this.auditService.record(

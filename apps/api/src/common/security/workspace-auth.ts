@@ -57,6 +57,11 @@ function resolveWorkspaceIdFromRequest(request: FastifyRequest): string | null {
     return query.workspaceId;
   }
 
+  const headerWorkspaceId = request.headers["x-workspace-id"];
+  if (typeof headerWorkspaceId === "string" && headerWorkspaceId.length > 0) {
+    return headerWorkspaceId;
+  }
+
   return null;
 }
 

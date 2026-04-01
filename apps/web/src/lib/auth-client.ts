@@ -8,14 +8,33 @@ import type {
 } from "./auth-types";
 
 type ApiError = {
-  message: string;
+  code?: string;
+  message?: string;
+};
+
+type ApiSuccessEnvelope<T> = {
+  success: true;
+  data: T;
+  meta: {
+    requestId: string | null;
+    timestamp: string;
+  };
+};
+
+type ApiErrorEnvelope = {
+  success: false;
+  error: ApiError;
+  meta: {
+    requestId: string | null;
+    timestamp: string;
+  };
 };
 
 async function apiFetch<TResponse>(
   path: string,
   options: RequestInit = {}
 ): Promise<TResponse> {
-  const response = await fetch(`${webEnv.NEXT_PUBLIC_API_URL}${path}`, {
+  const response = await fetch(`${webEnv.NEXT_PUBLIC_API_URL}/api/v1${path}`, {
     ...options,
     credentials: "include",
     headers: {
@@ -27,9 +46,9 @@ async function apiFetch<TResponse>(
   if (!response.ok) {
     let message = "Request failed.";
     try {
-      const parsed = (await response.json()) as ApiError;
-      if (parsed.message) {
-        message = parsed.message;
+      const parsed = (await response.json()) as ApiErrorEnvelope;
+      if (parsed.error?.message) {
+        message = parsed.error.message;
       }
     } catch {
       // ignore non-json error body
@@ -37,7 +56,8 @@ async function apiFetch<TResponse>(
     throw new Error(message);
   }
 
-  return (await response.json()) as TResponse;
+  const parsed = (await response.json()) as ApiSuccessEnvelope<TResponse>;
+  return parsed.data;
 }
 
 export async function signIn(input: {

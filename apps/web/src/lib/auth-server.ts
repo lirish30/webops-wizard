@@ -8,7 +8,7 @@ export async function getServerSession(): Promise<AuthSession | null> {
   const cookieHeader = cookieStore.toString();
 
   const response = await fetch(
-    `${webEnv.NEXT_PUBLIC_API_URL}/auth/session?allowRefresh=false`,
+    `${webEnv.NEXT_PUBLIC_API_URL}/api/v1/auth/session?allowRefresh=false`,
     {
       method: "GET",
       cache: "no-store",
@@ -20,6 +20,9 @@ export async function getServerSession(): Promise<AuthSession | null> {
     return null;
   }
 
-  const parsed = (await response.json()) as { session: AuthSession };
-  return parsed.session;
+  const parsed = (await response.json()) as {
+    success: true;
+    data: { session: AuthSession };
+  };
+  return parsed.data.session;
 }

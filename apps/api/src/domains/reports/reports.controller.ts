@@ -1,8 +1,19 @@
 import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
-import { prisma } from "@webops-wizard/db";
+import {
+  ApiBody,
+  ApiCookieAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags
+} from "@nestjs/swagger";
 import type { FastifyRequest } from "fastify";
 
 import { AuditService } from "../../common/audit/audit.service";
+import {
+  buildSuccessEnvelopeSchema,
+  COOKIE_AUTH_SCHEME
+} from "../../common/api/openapi-schemas";
+import { parseWithSchema } from "../../common/api/validation";
 import {
   CurrentWorkspace,
   RequireWorkspaceCapabilities,
@@ -10,47 +21,61 @@ import {
   WorkspaceAccessGuard,
   type WorkspaceAccess
 } from "../../common/security/workspace-auth";
+import { sendReportSchema } from "./reports.dto";
+import { ReportsService } from "./reports.service";
 
 @Controller("reports")
 @UseGuards(SessionAuthGuard, WorkspaceAccessGuard)
+@ApiTags("reports")
+@ApiCookieAuth(COOKIE_AUTH_SCHEME)
 export class ReportsController {
-  constructor(private readonly auditService: AuditService) {}
+  constructor(
+    private readonly reportsService: ReportsService,
+    private readonly auditService: AuditService
+  ) {}
 
   @Get()
   @RequireWorkspaceCapabilities("reports.read")
-  async listReports(@CurrentWorkspace() workspace: WorkspaceAccess) {
-    const [recommendationCount, alertCount, releaseCount] = await Promise.all([
-      prisma.recommendation.count({
-        where: { property: { workspaceId: workspace.workspaceId } }
-      }),
-      prisma.alert.count({
-        where: { property: { workspaceId: workspace.workspaceId } }
-      }),
-      prisma.releaseAnnotation.count({
-        where: { property: { workspaceId: workspace.workspaceId } }
-      })
-    ]);
-
-    return {
-      workspaceId: workspace.workspaceId,
-      generatedAt: new Date().toISOString(),
-      summary: {
-        recommendationCount,
-        alertCount,
-        releaseCount
+  @ApiOperation({ summary: "Get report summary for workspace" })
+  @ApiOkResponse({
+    schema: buildSuccessEnvelopeSchema({
+      type: "object",
+      properties: {
+        workspaceId: { type: "string", format: "uuid" },
+        generatedAt: { type: "string", format: "date-time" },
+        summary: { type: "object", additionalProperties: true }
       }
-    };
+    })
+  })
+  async listReports(@CurrentWorkspace() workspace: WorkspaceAccess) {
+    return this.reportsService.getReportSummary(workspace.workspaceId);
   }
 
   @Post("send")
   @RequireWorkspaceCapabilities("reports.send")
+  @ApiOperation({ summary: "Send a workspace report to recipients" })
+  @ApiBody({
+    schema: {
+      type: "object",
+      properties: {
+        reportName: { type: "string", example: "Weekly SEO Summary" },
+        recipients: {
+          type: "array",
+          items: { type: "string", format: "email" },
+          example: ["ops@acme.com", "ceo@acme.com"]
+        }
+      },
+      required: ["reportName", "recipients"]
+    }
+  })
   async sendReport(
-    @Body() body: { reportName: string; recipients: string[] },
+    @Body() body: unknown,
     @CurrentWorkspace() workspace: WorkspaceAccess,
     @Req() request: FastifyRequest
   ) {
-    const reportName = body.reportName?.trim() || "Untitled report";
-    const recipients = Array.isArray(body.recipients) ? body.recipients : [];
+    const input = parseWithSchema(sendReportSchema, body);
+    const reportName = input.reportName.trim();
+    const recipients = input.recipients;
 
     await this.auditService.record(
       {

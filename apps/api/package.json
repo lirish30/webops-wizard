@@ -7,6 +7,7 @@
     "build": "tsc -p tsconfig.json --noEmit false --emitDeclarationOnly false",
     "dev": "tsx watch src/main.ts",
     "lint": "eslint src --ext .ts",
+    "openapi:generate": "tsx src/scripts/generate-openapi.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -14,6 +15,7 @@
     "@nestjs/common": "^11.0.12",
     "@nestjs/core": "^11.0.12",
     "@nestjs/platform-fastify": "^11.0.12",
+    "@nestjs/swagger": "^11.2.6",
     "@prisma/client": "^6.6.0",
     "@webops-wizard/config": "workspace:*",
     "@webops-wizard/db": "workspace:*",
@@ -21,6 +23,7 @@
     "fastify": "^5.5.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
+    "swagger-ui-express": "^5.0.1",
     "zod": "^3.24.2"
   },
   "devDependencies": {

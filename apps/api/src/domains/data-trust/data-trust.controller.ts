@@ -1,6 +1,7 @@
 import { Controller, Get, UseGuards } from "@nestjs/common";
-import { prisma } from "@webops-wizard/db";
+import { ApiCookieAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 
+import { COOKIE_AUTH_SCHEME } from "../../common/api/openapi-schemas";
 import {
   CurrentWorkspace,
   RequireWorkspaceCapabilities,
@@ -8,30 +9,19 @@ import {
   WorkspaceAccessGuard,
   type WorkspaceAccess
 } from "../../common/security/workspace-auth";
+import { DataTrustService } from "./data-trust.service";
 
 @Controller("data-trust")
 @UseGuards(SessionAuthGuard, WorkspaceAccessGuard)
+@ApiTags("data-trust")
+@ApiCookieAuth(COOKIE_AUTH_SCHEME)
 export class DataTrustController {
+  constructor(private readonly dataTrustService: DataTrustService) {}
+
   @Get()
   @RequireWorkspaceCapabilities("data_trust.read")
+  @ApiOperation({ summary: "Get data trust health summary" })
   async getDataTrust(@CurrentWorkspace() workspace: WorkspaceAccess) {
-    const [propertyCount, integrationCount] = await Promise.all([
-      prisma.property.count({
-        where: { workspaceId: workspace.workspaceId }
-      }),
-      prisma.integrationConnection.count({
-        where: { workspaceId: workspace.workspaceId }
-      })
-    ]);
-
-    return {
-      workspaceId: workspace.workspaceId,
-      status: "healthy",
-      signals: {
-        propertyCount,
-        integrationCount
-      }
-    };
+    return this.dataTrustService.getSummary(workspace.workspaceId);
   }
 }
-
