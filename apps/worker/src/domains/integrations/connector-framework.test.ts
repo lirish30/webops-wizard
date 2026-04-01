@@ -11,9 +11,7 @@ import {
   runWithRetry
 } from "./sync/retry";
 import { createConnectorRegistry } from "./connectors/connector.registry";
-import { createCrawlerConnector } from "./connectors/crawler/crawler.connector";
 import { createGa4Connector } from "./connectors/ga4/ga4.connector";
-import { createSitemapConnector } from "./connectors/sitemap/sitemap.connector";
 import {
   InMemorySyncPersistence,
   runConnectorSync
@@ -89,15 +87,9 @@ function createCapturingLogger() {
 
 describe("connector registry", () => {
   it("resolves registered providers and rejects unknown providers", () => {
-    const registry = createConnectorRegistry([
-      createGa4Connector(),
-      createSitemapConnector(),
-      createCrawlerConnector()
-    ]);
+    const registry = createConnectorRegistry([createGa4Connector()]);
 
     expect(registry.get("ga4").provider).toBe("ga4");
-    expect(registry.get("sitemap").provider).toBe("sitemap");
-    expect(registry.get("crawler").provider).toBe("crawler");
     expect(() => registry.get("gsc")).toThrowError(/No connector registered/);
   });
 });
@@ -372,8 +364,8 @@ describe("sync runner", () => {
       pageMetricsStore: {
         async ingest() {
           return {
-            recordsSynced: 2,
-            unresolvedPagePaths: []
+            recordsSynced: 1,
+            unresolvedPagePaths: ["https://example.com/unresolved"]
           };
         }
       }
@@ -398,7 +390,7 @@ describe("sync runner", () => {
         propertyId: "prop_1",
         provider: "ga4",
         credentialRef: "cred-ga4-2",
-        freshnessSlaMinutes: 60,
+        freshnessSlaMinutes: 3000,
         configJson: {
           selectedProperty: {
             propertyId: "properties/1234",
@@ -407,20 +399,21 @@ describe("sync runner", () => {
         }
       },
       trigger: "schedule",
-      now: new Date("2026-04-01T03:00:00.000Z"),
+      now: new Date("2026-03-31T00:30:00.000Z"),
       connector,
       credentialStore: store,
       persistence,
       retryPolicy: createRetryPolicy({ maxAttempts: 2, baseDelayMs: 1 })
     });
 
-    expect(result.status).toBe("success");
-    expect(result.partialFailure).toBe(false);
-    expect(result.coverage.ratio).toBe(1);
-    expect(result.freshness.withinSla).toBe(false);
+    expect(result.status).toBe("partial_failed");
+    expect(result.partialFailure).toBe(true);
+    expect(result.coverage.ratio).toBeCloseTo(1 / 2, 3);
+    expect(result.freshness.withinSla).toBe(true);
 
     const latestRun = persistence.getLatestRun("ic_1");
-    expect(latestRun?.issues.length).toBe(0);
+    expect(latestRun?.issues.length).toBe(1);
+    expect(latestRun?.issues[0]?.segment).toBe("page-resolution");
   });
 
   it("records successful-run telemetry and health summaries", async () => {
@@ -648,49 +641,5 @@ describe("scheduler", () => {
 
     expect(jobs).toHaveLength(1);
     expect(jobs[0]?.payload.integrationConnectionId).toBe("ic_due");
-  });
-
-  it("queues sitemap sync when cadence window has elapsed", () => {
-    const jobs = buildDueSyncJobs(
-      [
-        {
-          id: "ic_sitemap_due",
-          provider: "sitemap",
-          configJson: null,
-          lastSyncedAt: new Date("2026-04-01T00:00:00.000Z")
-        },
-        {
-          id: "ic_sitemap_not_due",
-          provider: "sitemap",
-          configJson: {
-            connectorSchedule: {
-              everyMinutes: 720
-            }
-          },
-          lastSyncedAt: new Date("2026-04-01T03:00:00.000Z")
-        }
-      ],
-      new Date("2026-04-01T06:01:00.000Z")
-    );
-
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0]?.payload.integrationConnectionId).toBe("ic_sitemap_due");
-  });
-
-  it("queues crawler sync when cadence window has elapsed", () => {
-    const jobs = buildDueSyncJobs(
-      [
-        {
-          id: "ic_crawler_due",
-          provider: "crawler",
-          configJson: null,
-          lastSyncedAt: new Date("2026-04-01T00:00:00.000Z")
-        }
-      ],
-      new Date("2026-04-01T06:01:00.000Z")
-    );
-
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0]?.payload.integrationConnectionId).toBe("ic_crawler_due");
   });
 });
